@@ -1,0 +1,47 @@
+OpenClaw dataset summary
+
+Files:
+1. <SESSION_1_FILE>.jsonl
+   - Main real OpenClaw session trace
+   - Contains mixed successful and failed runs, retries, user messages, assistant responses, embedded tool calls, and tool results
+
+2. <SESSION_2_FILE>.jsonl
+   - Second real OpenClaw session trace
+   - Contains fresh-session bootstrap behavior, internal read tool calls, successful reads, missing-file ENOENT errors, one successful task, and one failed task
+
+Counts:
+Session 1
+- user messages: 31
+- assistant messages: 67
+- tool results: 48
+- embedded tool calls: 48
+- assistant stop messages: 30
+- failed tool results: 8
+
+Session 2
+- user messages: 3
+- assistant messages: 5
+- tool results: 7
+- embedded tool calls: 7
+- failed tool results: 5
+
+Important format notes:
+- Tool calls are often embedded inside assistant message.content as items with type="toolCall"
+- Tool outputs appear as message.role="toolResult"
+- Successful pattern often looks like:
+  user -> assistant(with embedded toolCall) -> toolResult(success) -> assistant(final response)
+- Failure pattern often looks like:
+  user -> assistant(with embedded toolCall) -> toolResult(error) -> assistant(explanation)
+- Retry pattern may show repeated embedded toolCall + toolResult pairs before the final assistant response
+
+How this relates to the project:
+- These files should be treated as the real OpenClaw trace dataset for the project handoff.
+- Synthetic traces were used earlier to bootstrap the project pipeline and visual flow.
+- These raw OpenClaw session traces are now the source of truth for real trajectory analysis.
+- Higher-level failure categories such as tool misuse, early quit, reasoning gaps, or missing steps may need to be derived during ingestion, annotation, or visualization, because they are not always explicitly pre-labeled in the raw trace files.
+
+Purpose:
+- Use these files for step-by-step trajectory inspection
+- Compare successful vs failed runs
+- Analyze where failures emerge
+- Support debugging and post-hoc human understanding of agent behavior

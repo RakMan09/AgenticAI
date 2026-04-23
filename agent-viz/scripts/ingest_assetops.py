@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Ingest canonical event-level traces (and legacy traces) into DuckDB."""
+"""Ingest OpenClaw session traces, canonical event-level traces, and legacy traces into DuckDB."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import json
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -131,8 +132,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--raw-dir",
         type=Path,
-        default=Path("data/raw/project1_event_runs/generated"),
-        help="Canonical raw run directory.",
+        default=Path("dataset"),
+        help="Canonical raw run directory (OpenClaw session JSONL by default).",
     )
     parser.add_argument(
         "--manifest-file",
@@ -232,6 +233,497 @@ def is_event_level_row(row: dict[str, Any]) -> bool:
     return all(key in row for key in ("run_id", "event_id", "event_type", "payload"))
 
 
+def is_openclaw_session_rows(rows: list[dict[str, Any]]) -> bool:
+    if not rows:
+        return False
+    has_message_rows = any(
+        row.get("type") == "message" and isinstance(row.get("message"), dict)
+        for row in rows
+    )
+    has_session_rows = any(row.get("type") in {"session", "model_change", "thinking_level_change"} for row in rows)
+    return has_message_rows and has_session_rows
+
+
+def extract_text_from_content(content: Any) -> str | None:
+    if isinstance(content, str):
+        cleaned = content.strip()
+        return cleaned or None
+    if not isinstance(content, list):
+        return None
+    chunks: list[str] = []
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        item_type = str(item.get("type", "")).strip().lower()
+        if item_type == "text":
+            text_value = shorten_text(item.get("text"))
+            if text_value:
+                chunks.append(text_value)
+        elif item_type == "thinking":
+            thinking_value = shorten_text(item.get("thinking"))
+            if thinking_value:
+                chunks.append(thinking_value)
+    if not chunks:
+        return None
+    return "\n".join(chunks).strip() or None
+
+
+def cleaned_user_prompt(text: str | None) -> str | None:
+    if not text:
+        return None
+    cleaned = text
+    cleaned = re.sub(
+        r"Sender \(untrusted metadata\):\s*```json.*?```",
+        "",
+        cleaned,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"System \(untrusted\):.*?\n\n",
+        "",
+        cleaned,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    cleaned = cleaned.replace("```", "")
+    cleaned = re.sub(r"^\[[^\]]+\]\s*", "", cleaned.strip())
+    cleaned = cleaned.strip()
+    return cleaned or text.strip()
+
+
+def short_scenario_text(text: str | None, max_len: int = 180) -> str | None:
+    cleaned = cleaned_user_prompt(text)
+    if not cleaned:
+        return None
+    normalized = " ".join(cleaned.split())
+    return normalized[:max_len]
+
+
+def parse_tool_output_from_message(message_obj: dict[str, Any]) -> tuple[str | None, dict[str, Any] | None]:
+    details = message_obj.get("details")
+    if isinstance(details, dict):
+        summary = details.get("error") or details.get("status") or details.get("title")
+        return shorten_text(summary), details
+    text_payload = extract_text_from_content(message_obj.get("content"))
+    if not text_payload:
+        return None, None
+    try:
+        parsed = json.loads(text_payload)
+        if isinstance(parsed, dict):
+            summary = parsed.get("error") or parsed.get("status") or parsed.get("title")
+            return shorten_text(summary), parsed
+    except json.JSONDecodeError:
+        pass
+    return text_payload[:500], {"text": text_payload}
+
+
+def infer_openclaw_outcome(
+    has_assistant_stop: bool,
+    has_assistant_error: bool,
+    has_tool_error: bool,
+    assistant_final_text: list[str],
+) -> str:
+    if has_assistant_error:
+        return "fail"
+    if has_assistant_stop:
+        joined = " ".join(assistant_final_text).lower()
+        if any(token in joined for token in ("failed", "cannot", "can't", "unable", "error")):
+            return "fail"
+        return "success"
+    if has_tool_error:
+        return "fail"
+    return "unknown"
+
+
+def infer_openclaw_failure_category(
+    outcome: str,
+    all_steps: list[DerivedStep],
+    has_timeout: bool,
+    has_missing_file: bool,
+    has_auth_error: bool,
+) -> str | None:
+    if outcome != "fail":
+        if any(step.error_flag for step in all_steps):
+            return "partial_recovery"
+        return None
+    if has_auth_error:
+        return "tool_misuse"
+    if has_timeout:
+        return "timeout_failure"
+    if has_missing_file:
+        return "missing_tool"
+    retry_events = [step for step in all_steps if (step.retry_count or 0) > 0]
+    if retry_events:
+        return "repeated_retry"
+    return "unknown_failure_pattern"
+
+
+def derive_from_openclaw_session_rows(
+    rows: list[dict[str, Any]],
+    source_file: str,
+    file_path: Path,
+) -> list[tuple[DerivedRun, list[DerivedStep], list[RawEvent], list[Annotation]]]:
+    message_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if row.get("type") == "message" and isinstance(row.get("message"), dict):
+            message_rows.append(row)
+
+    if not message_rows:
+        return []
+
+    user_turn_indices = [
+        index
+        for index, row in enumerate(message_rows)
+        if str(row.get("message", {}).get("role", "")).lower() == "user"
+    ]
+    if not user_turn_indices:
+        return []
+
+    session_id = next((shorten_text(row.get("id")) for row in rows if row.get("type") == "session"), None)
+    dataset_name = "openclaw_session_traces_v1"
+    outputs: list[tuple[DerivedRun, list[DerivedStep], list[RawEvent], list[Annotation]]] = []
+
+    for turn_idx, turn_start in enumerate(user_turn_indices):
+        turn_end = user_turn_indices[turn_idx + 1] if turn_idx + 1 < len(user_turn_indices) else len(message_rows)
+        turn_messages = message_rows[turn_start:turn_end]
+        if not turn_messages:
+            continue
+
+        user_row = turn_messages[0]
+        user_message_obj = user_row.get("message", {})
+        user_text = extract_text_from_content(user_message_obj.get("content"))
+        scenario = short_scenario_text(user_text)
+        run_seed = f"{file_path.as_posix()}::{turn_idx}::{user_row.get('id', '')}"
+        run_id = f"run_openclaw_{hashlib.sha1(run_seed.encode('utf-8')).hexdigest()[:12]}"
+
+        derived_steps: list[DerivedStep] = []
+        derived_raw_events: list[RawEvent] = []
+        tool_retry_counter: Counter[str] = Counter()
+        tool_call_event_by_id: dict[str, str] = {}
+        has_assistant_stop = False
+        has_assistant_error = False
+        has_tool_error = False
+        has_timeout = False
+        has_missing_file = False
+        has_auth_error = False
+        assistant_final_text: list[str] = []
+        step_idx = 0
+
+        def append_step(
+            *,
+            row_id: str,
+            timestamp: str | None,
+            event_type: str,
+            step_type: str,
+            text: str | None,
+            tool_name: str | None = None,
+            tool_input: Any = None,
+            tool_output: Any = None,
+            error_flag: bool = False,
+            error_type: str | None = None,
+            latency_ms: int | None = None,
+            retry_count: int | None = None,
+            parent_event_id: str | None = None,
+            status: str | None = None,
+            inferred_intent: str | None = None,
+            intended_next_action: str | None = None,
+            tags: list[str] | None = None,
+            payload_for_raw_event: dict[str, Any] | None = None,
+        ) -> None:
+            nonlocal step_idx
+            event_id = f"evt_{step_idx:04d}"
+            tag_list = tags if isinstance(tags, list) else []
+            tags_json = safe_json_dumps(tag_list) or "[]"
+            tool_input_json = safe_json_dumps(tool_input)
+            tool_output_json = safe_json_dumps(tool_output)
+            step = DerivedStep(
+                run_id=run_id,
+                event_id=event_id,
+                step_idx=step_idx,
+                event_type=event_type,
+                step_type=step_type,
+                agent_id=None,
+                text=text,
+                tool_name=tool_name,
+                tool_input=tool_input_json,
+                tool_output=tool_output_json,
+                error_flag=error_flag,
+                error_type=error_type,
+                latency_ms=latency_ms,
+                retry_count=retry_count,
+                timestamp=timestamp,
+                parent_event_id=parent_event_id,
+                causal_id=row_id,
+                tags=tags_json,
+                status=status,
+                inferred_intent=inferred_intent,
+                intended_next_action=intended_next_action,
+                evidence_summary=None,
+                source_file=source_file,
+            )
+            derived_steps.append(step)
+            raw_event_payload = payload_for_raw_event or {}
+            if text:
+                raw_event_payload.setdefault("summary", text[:1000])
+            if tool_name:
+                raw_event_payload.setdefault("tool_name", tool_name)
+            if tool_input is not None:
+                raw_event_payload.setdefault("input", tool_input)
+            if tool_output is not None:
+                raw_event_payload.setdefault("output", tool_output)
+            if error_type:
+                raw_event_payload.setdefault("error_type", error_type)
+            if latency_ms is not None:
+                raw_event_payload.setdefault("latency_ms", latency_ms)
+            if retry_count is not None:
+                raw_event_payload.setdefault("retry_count", retry_count)
+            raw_event = RawEvent(
+                schema_version="openclaw-session-v1",
+                generator_version=None,
+                dataset_name=dataset_name,
+                generated_at=None,
+                run_id=run_id,
+                run_type="openclaw_turn",
+                scenario=scenario,
+                expected_workflow=None,
+                event_id=event_id,
+                parent_event_id=parent_event_id,
+                causal_id=row_id,
+                timestamp=timestamp,
+                step_index=step_idx,
+                agent_id=None,
+                event_type=event_type,
+                status=status,
+                root_cause_event_id=None,
+                first_failure_event_id=None,
+                propagated_to_event_ids=safe_json_dumps([]),
+                tags=tags_json,
+                payload=safe_json_dumps(raw_event_payload),
+                loop_iteration=None,
+                loop_group=None,
+                repeated_pattern_id=None,
+                source_file=source_file,
+            )
+            derived_raw_events.append(raw_event)
+            step_idx += 1
+
+        for message_row in turn_messages:
+            row_id = shorten_text(message_row.get("id")) or f"row_{step_idx}"
+            timestamp = parse_possible_timestamp(message_row.get("timestamp"))
+            message_obj = message_row.get("message", {})
+            role = str(message_obj.get("role", "")).lower()
+
+            if role == "user":
+                prompt_text = cleaned_user_prompt(extract_text_from_content(message_obj.get("content")))
+                append_step(
+                    row_id=row_id,
+                    timestamp=timestamp,
+                    event_type="user_message",
+                    step_type="thought",
+                    text=prompt_text,
+                    status="input",
+                    tags=["openclaw", "user_turn"],
+                    payload_for_raw_event={"role": "user"},
+                )
+                continue
+
+            if role == "assistant":
+                stop_reason = shorten_text(message_obj.get("stopReason"))
+                error_message = shorten_text(message_obj.get("errorMessage"))
+                content = message_obj.get("content")
+                if stop_reason == "stop":
+                    has_assistant_stop = True
+
+                if isinstance(content, list):
+                    for item_idx, item in enumerate(content):
+                        if not isinstance(item, dict):
+                            continue
+                        item_type = str(item.get("type", "")).lower()
+                        row_part_id = f"{row_id}#{item_idx}"
+                        if item_type == "thinking":
+                            append_step(
+                                row_id=row_part_id,
+                                timestamp=timestamp,
+                                event_type="assistant_thinking",
+                                step_type="thought",
+                                text=shorten_text(item.get("thinking")),
+                                status=stop_reason,
+                                tags=["openclaw", "assistant", "thinking"],
+                                payload_for_raw_event={"role": "assistant"},
+                            )
+                        elif item_type == "toolcall":
+                            tool_name = shorten_text(item.get("name"))
+                            retry_count = None
+                            if tool_name:
+                                retry_count = tool_retry_counter[tool_name]
+                                tool_retry_counter[tool_name] += 1
+                            append_step(
+                                row_id=row_part_id,
+                                timestamp=timestamp,
+                                event_type="tool_call",
+                                step_type="tool_call",
+                                text=f"Tool call {tool_name or 'unknown'}",
+                                tool_name=tool_name,
+                                tool_input=item.get("arguments"),
+                                status="requested",
+                                retry_count=retry_count,
+                                tags=["openclaw", "assistant", "tool_call"],
+                                payload_for_raw_event={"role": "assistant", "tool_call_id": item.get("id")},
+                            )
+                            tool_call_id = shorten_text(item.get("id"))
+                            if tool_call_id:
+                                tool_call_event_by_id[tool_call_id] = f"evt_{step_idx - 1:04d}"
+                        elif item_type == "text":
+                            text_value = shorten_text(item.get("text"))
+                            if text_value:
+                                assistant_final_text.append(text_value)
+                            append_step(
+                                row_id=row_part_id,
+                                timestamp=timestamp,
+                                event_type="assistant_message",
+                                step_type="action",
+                                text=text_value,
+                                status=stop_reason,
+                                tags=["openclaw", "assistant", "text"],
+                                payload_for_raw_event={"role": "assistant"},
+                            )
+                        else:
+                            append_step(
+                                row_id=row_part_id,
+                                timestamp=timestamp,
+                                event_type="assistant_message",
+                                step_type="unknown",
+                                text=shorten_text(item),
+                                status=stop_reason,
+                                tags=["openclaw", "assistant", "unknown_content_type"],
+                                payload_for_raw_event={"role": "assistant", "content_type": item_type},
+                            )
+
+                if error_message:
+                    has_assistant_error = True
+                    if "api key" in error_message.lower() or "401" in error_message.lower():
+                        has_auth_error = True
+                    append_step(
+                        row_id=row_id,
+                        timestamp=timestamp,
+                        event_type="assistant_error",
+                        step_type="observation",
+                        text=error_message,
+                        error_flag=True,
+                        error_type="assistant_error",
+                        status="error",
+                        tags=["openclaw", "assistant", "error"],
+                        payload_for_raw_event={"role": "assistant", "stop_reason": stop_reason},
+                    )
+                continue
+
+            if role == "toolresult":
+                tool_name = shorten_text(message_obj.get("toolName"))
+                summary, output_obj = parse_tool_output_from_message(message_obj)
+                details = message_obj.get("details") if isinstance(message_obj.get("details"), dict) else {}
+                tool_call_id = shorten_text(message_obj.get("toolCallId"))
+                parent_event_id = tool_call_event_by_id.get(tool_call_id) if tool_call_id else None
+                status = shorten_text(details.get("status")) or ("error" if bool(message_obj.get("isError")) else "success")
+                latency_val = details.get("tookMs")
+                latency_ms = int(latency_val) if isinstance(latency_val, int) else None
+                error_type = shorten_text(details.get("error"))
+                output_text = summary or f"Tool result {tool_name or 'unknown'} ({status or 'unknown'})"
+                error_flag = (
+                    status is not None
+                    and status.lower() in {"error", "failed", "failure", "timeout"}
+                ) or bool(error_type)
+                if error_flag:
+                    has_tool_error = True
+                low_bundle = f"{output_text} {safe_json_dumps(output_obj) or ''}".lower()
+                if "timeout" in low_bundle:
+                    has_timeout = True
+                if "enoent" in low_bundle or "no such file" in low_bundle:
+                    has_missing_file = True
+                if "api key" in low_bundle or "incorrect api key" in low_bundle or "401" in low_bundle:
+                    has_auth_error = True
+                append_step(
+                    row_id=row_id,
+                    timestamp=timestamp,
+                    event_type="tool_result",
+                    step_type="observation",
+                    text=output_text,
+                    tool_name=tool_name,
+                    tool_output=output_obj,
+                    error_flag=error_flag,
+                    error_type=error_type,
+                    latency_ms=latency_ms,
+                    parent_event_id=parent_event_id,
+                    status=status,
+                    tags=["openclaw", "tool_result"],
+                    payload_for_raw_event={"role": "toolResult", "tool_call_id": tool_call_id},
+                )
+                continue
+
+            # Keep unknown message roles visible in trace timeline.
+            append_step(
+                row_id=row_id,
+                timestamp=timestamp,
+                event_type="message",
+                step_type="unknown",
+                text=extract_text_from_content(message_obj.get("content")) or shorten_text(message_obj),
+                status=shorten_text(message_obj.get("status")),
+                tags=["openclaw", "unknown_role"],
+                payload_for_raw_event={"role": role},
+            )
+
+        if not derived_steps:
+            continue
+
+        outcome = infer_openclaw_outcome(
+            has_assistant_stop=has_assistant_stop,
+            has_assistant_error=has_assistant_error,
+            has_tool_error=has_tool_error,
+            assistant_final_text=assistant_final_text,
+        )
+        failure_category = infer_openclaw_failure_category(
+            outcome=outcome,
+            all_steps=derived_steps,
+            has_timeout=has_timeout,
+            has_missing_file=has_missing_file,
+            has_auth_error=has_auth_error,
+        )
+        first_error_step = next((step.step_idx for step in derived_steps if step.error_flag), None)
+        first_failure_event_id = next((step.event_id for step in derived_steps if step.error_flag), None)
+        root_cause_event_id = first_failure_event_id
+        started_at = derived_steps[0].timestamp
+        ended_at = derived_steps[-1].timestamp
+        run = DerivedRun(
+            run_id=run_id,
+            source="openclaw_real",
+            dataset_name=dataset_name,
+            run_type="openclaw_turn",
+            task_id=f"openclaw_turn_{turn_idx + 1}",
+            scenario=scenario,
+            outcome=outcome,
+            failure_category=failure_category,
+            num_steps=len(derived_steps),
+            first_error_step=first_error_step,
+            first_failure_event_id=first_failure_event_id,
+            root_cause_event_id=root_cause_event_id,
+            expected_workflow=None,
+            started_at=started_at,
+            ended_at=ended_at,
+            metadata=safe_json_dumps(
+                {
+                    "source_file": source_file,
+                    "session_id": session_id,
+                    "user_message_id": user_row.get("id"),
+                    "user_message_text": scenario,
+                    "openclaw_format": "session_jsonl_v3",
+                }
+            )
+            or "{}",
+        )
+        annotations = build_labels_for_run(run, derived_raw_events, derived_steps, failure_category)
+        outputs.append((run, derived_steps, derived_raw_events, annotations))
+
+    return outputs
+
+
 def extract_event_type_to_step_type(event_type: str, tool_name: str | None) -> str:
     low = (event_type or "").lower()
     if low == "belief_update":
@@ -314,7 +806,7 @@ def derive_from_event_rows(
         raise ValueError("empty event run")
 
     run_id = raw_events[0].run_id
-    run_type = raw_events[0].run_type
+    run_type = raw_events[0].run_type or (shorten_text(manifest_row.get("run_type")) if manifest_row else None)
     dataset_name = raw_events[0].dataset_name or (shorten_text(manifest_row.get("dataset_name")) if manifest_row else None)
     scenario = raw_events[0].scenario or (shorten_text(manifest_row.get("scenario")) if manifest_row else None)
     expected_workflow = raw_events[0].expected_workflow or (safe_json_dumps(manifest_row.get("expected_workflow")) if manifest_row else None)
@@ -391,10 +883,25 @@ def derive_from_event_rows(
             )
         )
 
+    if outcome == "unknown":
+        if any(step.error_flag for step in steps):
+            outcome = "fail"
+        elif steps and all((step.status or "").lower() in {"success", "ok", "completed"} for step in steps if step.status):
+            outcome = "success"
+
+    source = "canonical_synthetic"
+    if any(
+        "openclaw" in (event.source_file or "").lower()
+        or "openclaw" in (event.dataset_name or "").lower()
+        or "openclaw" in (event.tags or "").lower()
+        for event in raw_events
+    ):
+        source = "openclaw_real"
+
     first_error_step = next((step.step_idx for step in steps if step.error_flag), None)
     run = DerivedRun(
         run_id=run_id,
-        source="canonical_synthetic",
+        source=source,
         dataset_name=dataset_name,
         run_type=run_type,
         task_id=run_type,
@@ -1344,12 +1851,23 @@ def write_normalized_jsonl(path: Path, runs: list[DerivedRun], steps_by_run: dic
 def ingest(args: argparse.Namespace) -> int:
     manifest_by_run = parse_manifest(args.manifest_file)
 
-    canonical_files = discover_trace_files(args.raw_dir)
+    raw_dir = args.raw_dir
+    if not raw_dir.exists():
+        fallback_dirs = [
+            Path("Dataset"),
+            Path("data/raw/project1_event_runs/generated"),
+        ]
+        for candidate in fallback_dirs:
+            if candidate.exists():
+                raw_dir = candidate
+                break
+
+    canonical_files = discover_trace_files(raw_dir)
     legacy_files = discover_trace_files(args.legacy_dir) if args.include_legacy else []
 
     if not canonical_files and not legacy_files:
         print("[ERROR] No raw trace files found.")
-        print(f"  canonical dir: {args.raw_dir}")
+        print(f"  canonical dir: {raw_dir}")
         print(f"  legacy dir: {args.legacy_dir} (include with --include-legacy)")
         return 1
 
@@ -1360,7 +1878,21 @@ def ingest(args: argparse.Namespace) -> int:
     steps_by_run: dict[str, list[DerivedStep]] = defaultdict(list)
 
     for file_path in canonical_files:
-        rows = read_jsonl_dicts(file_path) if file_path.suffix.lower() == ".jsonl" else []
+        if file_path.suffix.lower() == ".jsonl":
+            rows = read_jsonl_dicts(file_path)
+        elif file_path.suffix.lower() == ".json":
+            try:
+                payload = json.loads(file_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, list):
+                rows = [row for row in payload if isinstance(row, dict)]
+            elif isinstance(payload, dict):
+                rows = [payload]
+            else:
+                rows = []
+        else:
+            rows = []
         if not rows:
             continue
         if all(is_event_level_row(row) for row in rows):
@@ -1374,6 +1906,16 @@ def ingest(args: argparse.Namespace) -> int:
             raw_events.extend(derived_raw_events)
             annotations.extend(derived_annotations)
             steps_by_run[run.run_id].extend(derived_steps)
+            continue
+
+        if is_openclaw_session_rows(rows):
+            openclaw_outputs = derive_from_openclaw_session_rows(rows, str(file_path), file_path)
+            for run, derived_steps, derived_raw_events, derived_annotations in openclaw_outputs:
+                runs.append(run)
+                steps.extend(derived_steps)
+                raw_events.extend(derived_raw_events)
+                annotations.extend(derived_annotations)
+                steps_by_run[run.run_id].extend(derived_steps)
 
     if args.include_legacy:
         for file_path in legacy_files:

@@ -19,12 +19,13 @@ Status: implemented through **Week 15** of the Project 1 roadmap.
 ## Repository Structure
 ```text
 agent-viz/
+  Dataset/               # real OpenClaw session traces (source of truth)
   apps/
     api/                 # FastAPI app
     web/                 # Next.js app
   data/
-    raw/project1_event_runs/generated/
-    manifests/all_runs_manifest.jsonl
+    raw/project1_event_runs/generated/   # optional synthetic fallback
+    manifests/all_runs_manifest.jsonl    # optional synthetic manifest
     legacy/
     normalized/
   db/
@@ -45,8 +46,15 @@ From `agent-viz/`:
 ```bash
 python -m pip install -r requirements.txt
 cd apps/web && npm install && cd ../..
-python data/generate_traces.py --out-dir data/raw/project1_event_runs/generated --manifest-file data/manifests/all_runs_manifest.jsonl --seed 7 --overwrite
 python scripts/ingest_assetops.py
+```
+
+Notes:
+- Default ingest source is `dataset/` (or `Dataset/` fallback) for real OpenClaw session traces.
+- To ingest synthetic traces instead:
+```bash
+python data/generate_traces.py --out-dir data/raw/project1_event_runs/generated --manifest-file data/manifests/all_runs_manifest.jsonl --seed 7 --overwrite
+python scripts/ingest_assetops.py --raw-dir data/raw/project1_event_runs/generated
 ```
 
 Run API (choose a free port; `8001` used below):
@@ -130,8 +138,8 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8001 npm run dev
 ```
 
 ## Data Note
-Current default dataset is canonical synthetic event-level traces.
-Real IBM AssetOpsBench execution traces can be plugged in later without changing the UI architecture.
+Current default dataset is real OpenClaw session JSONL traces from `Dataset/`.
+Synthetic traces remain available as a fallback/dev dataset.
 
 ## Documentation
 - `docs/current_status.md`

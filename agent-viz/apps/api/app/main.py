@@ -76,6 +76,17 @@ def health() -> dict[str, str]:
     return {"status": "ok", "db_path": get_db_path()}
 
 
+@app.get("/")
+def root() -> dict[str, Any]:
+    return {
+        "service": "agent-viz-api",
+        "status": "ok",
+        "docs": "/docs",
+        "health": "/health",
+        "runs": "/runs?limit=5",
+    }
+
+
 @app.get("/runs", response_model=RunsResponse)
 def list_runs(
     outcome: str | None = Query(default="all"),

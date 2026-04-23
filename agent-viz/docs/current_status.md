@@ -1,9 +1,9 @@
 # Current Implementation Status (Project 1)
 
-Updated: 2026-04-02
+Updated: 2026-04-22
 
 ## Summary
-The codebase preserves Week 1-6 behavior and now extends through Week 15 with case-study workflow, reviewer notes, benchmark subsets, and final packaging docs on top of event-level ingestion, overlays, heuristics, gaps, and analytics.
+The codebase preserves Week 1-6 behavior and extends through Week 15 with case-study workflow, reviewer notes, benchmark subsets, and final packaging docs on top of ingestion, overlays, heuristics, gaps, and analytics. Canonical input is now the real OpenClaw session dataset in `Dataset/`.
 
 ## Week-by-Week Mapping
 - Week 1: Implemented. Ingestion + local DB pipeline exists.
@@ -24,6 +24,10 @@ The codebase preserves Week 1-6 behavior and now extends through Week 15 with ca
 
 ## What Exists Now
 - Canonical dataset direction:
+  - `Dataset/openclaw_session_trace_1.jsonl`
+  - `Dataset/openclaw_session_trace_2.jsonl`
+  - Run trajectories are derived per user turn from session-order events.
+- Secondary synthetic dataset support:
   - `data/raw/project1_event_runs/generated/`
   - `data/manifests/all_runs_manifest.jsonl`
 - Legacy preserved:
@@ -32,7 +36,7 @@ The codebase preserves Week 1-6 behavior and now extends through Week 15 with ca
 - Generator:
   - `data/generate_traces.py` now supports CLI, dataset metadata, and monotonic loop step indexing.
 - Ingestion:
-  - `scripts/ingest_assetops.py` now ingests canonical event runs first, with optional legacy inclusion.
+  - `scripts/ingest_assetops.py` now ingests OpenClaw session traces first, with fallback support for canonical synthetic event runs and optional legacy inclusion.
   - Creates/refreshes `raw_events`, `derived_runs`, `derived_steps`, compatibility `runs` and `steps`, `annotations`, and `run_stats`.
 - API:
   - Existing endpoints preserved.
