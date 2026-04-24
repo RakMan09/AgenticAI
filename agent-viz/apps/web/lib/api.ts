@@ -16,7 +16,7 @@ import type {
   StepsResponse,
 } from "./types";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8001";
 
 function withQuery(path: string, params: Record<string, string | number | boolean | undefined>) {
   const url = new URL(path, API_BASE_URL);

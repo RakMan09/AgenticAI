@@ -18,10 +18,20 @@ In a second terminal:
 
 ```bash
 cd agent-viz/apps/web
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8001 npm run dev
+npm run dev
 ```
 
 Open `http://localhost:3000`.
+
+The frontend defaults to `http://127.0.0.1:8001` for the API.
+
+## Current Highlights
+
+- trajectory-centric run explorer with failure-family grouping
+- run detail diagnosis with emergence, workflow, gap, and intervention views
+- compare mode with divergence summaries and semantic alignment
+- analytics with graph-based summaries, emergence heatmaps, and run scatterplots
+- case-study workflow with reviewer notes and baseline benchmark subset building
 
 For full setup details, see:
 

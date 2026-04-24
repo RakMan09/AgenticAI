@@ -6,7 +6,7 @@ It is built for **human sensemaking**:
 - inspect run trajectories step-by-step
 - compare successful vs failed runs
 - surface failure overlays and empty-space signals
-- analyze fleet-level failure patterns
+- analyze fleet-level failure patterns with graph-based summaries
 - create case studies and reviewer notes
 
 Status: implemented through **Week 15** of the Project 1 roadmap.
@@ -65,8 +65,11 @@ uvicorn apps.api.app.main:app --reload --host 0.0.0.0 --port 8001
 Run web:
 ```bash
 cd apps/web
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8001 npm run dev
+npm run dev
 ```
+
+The frontend defaults to `http://127.0.0.1:8001` for the API. Override with
+`NEXT_PUBLIC_API_BASE_URL` only if your backend is running elsewhere.
 
 Open:
 - `http://localhost:3000/` Run Explorer
@@ -76,13 +79,26 @@ Open:
 
 ## Core Features
 - Run Explorer with rich filtering and run stats
-- Trace Viewer with virtualized step timeline
+- Failure-family clustering and failure-emergence snapshots on the home page
+- Trace Viewer with phase map, expected-vs-observed workflow checks, and intervention hints
 - Failure overlays (`provided`, `taxonomy`, `heuristic`, `manual`)
 - Gap signals (`missing_*`, `absent_*`, `never_*`)
-- Compare view (raw + alignment-aware)
-- Fleet analytics (labels, gaps, tool usage, prevalence metrics)
+- Compare view (raw + alignment-aware) with divergence summaries
+- Fleet analytics with labels, gaps, tool usage, prevalence metrics, outcome bands, emergence heatmaps, and run scatterplots
 - Case-study mode and run-level reports (`json` + `md`)
 - Reviewer notes and benchmark subset assignment
+
+## Failure Heuristics
+The ingestion pipeline now distinguishes several structured failure categories instead of leaving many failed runs unresolved. Current HTTP/tool-related categories include:
+- `http_not_found`
+- `rate_limited`
+- `http_client_error`
+- `http_server_error`
+- `upstream_http_error`
+- `web_fetch_failure`
+- `tool_misuse`
+
+See `docs/heuristics.md` for the full detector list.
 
 ## API Endpoints (Key)
 - `GET /health`
@@ -128,13 +144,13 @@ curl "http://localhost:8001/runs?limit=1"
 ```bash
 cd apps/web
 rm -rf .next node_modules/.cache
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8001 npm run dev
+npm run dev
 ```
 - If still broken:
 ```bash
 rm -rf .next node_modules package-lock.json
 npm install
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8001 npm run dev
+npm run dev
 ```
 
 ## Data Note

@@ -19,12 +19,18 @@ Heuristics are computed during ingestion and stored in `annotations` with:
 8. `wrong_tool_chosen`
 9. `stale_belief_used`
 10. `partial_recovery`
-11. `absent_reasoning_step` (optional)
-12. `missing_retry_after_failure`
-13. `conflict_detected_but_unresolved`
-14. `never_reached_expected_stage`
-15. `finalization_without_evidence_consolidation`
-16. `unknown_failure_pattern` fallback for unresolved failures
+11. `http_not_found`
+12. `rate_limited`
+13. `http_client_error`
+14. `http_server_error`
+15. `upstream_http_error`
+16. `web_fetch_failure`
+17. `absent_reasoning_step` (optional)
+18. `missing_retry_after_failure`
+19. `conflict_detected_but_unresolved`
+20. `never_reached_expected_stage`
+21. `finalization_without_evidence_consolidation`
+22. `unknown_failure_pattern` fallback for unresolved failures
 
 ## Taxonomy Layer (Week 8)
 `run_type` to taxonomy labels are also emitted with:

@@ -3,8 +3,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { autoBuildBenchmarkSubsets, fetchBenchmarkSubsets, fetchCaseStudies } from "../../lib/api";
+import { fetchBenchmarkSubsets, fetchCaseStudies, autoBuildBenchmarkSubsets } from "../../lib/api";
 import type { BenchmarkSubsetRow, CaseStudyRow } from "../../lib/types";
+
+function copyText(value: string) {
+  if (typeof window === "undefined") return;
+  void navigator.clipboard.writeText(value);
+}
 
 export default function CaseStudiesPage() {
   const [items, setItems] = useState<CaseStudyRow[]>([]);
@@ -12,6 +17,7 @@ export default function CaseStudiesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [autoBuildResult, setAutoBuildResult] = useState<string>("");
+  const [notice, setNotice] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -34,11 +40,18 @@ export default function CaseStudiesPage() {
     void load();
   }, []);
 
+  useEffect(() => {
+    if (!notice) return;
+    const timeout = window.setTimeout(() => setNotice(""), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
+
   const handleAutoBuild = async () => {
     try {
       const result = await autoBuildBenchmarkSubsets();
       setAutoBuildResult(JSON.stringify(result.counts ?? {}, null, 2));
       await load();
+      setNotice("Benchmark subsets rebuilt.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to build subsets");
     }
@@ -46,94 +59,73 @@ export default function CaseStudiesPage() {
 
   return (
     <main className="container">
-      <h1 className="section-title">Case Study Mode</h1>
-      <p className="subtle">
-        Curated runs for presentation and reviewer evaluation artifacts.
-      </p>
+      <section className="hero-panel" style={{ marginBottom: 12 }}>
+        <div>
+          <p className="eyebrow">Evidence Workflow</p>
+          <h1 className="hero-title" style={{ fontSize: 30 }}>Case Study Mode</h1>
+          <p className="hero-copy">
+            Curate reproducible analysis bundles: saved runs, benchmark subsets, and shareable evidence links for reviewers and demos.
+          </p>
+        </div>
+        <div className="hero-actions">
+          <button onClick={() => void load()}>Refresh</button>
+          <button onClick={() => void handleAutoBuild()}>Auto-build baseline subsets</button>
+        </div>
+      </section>
+
+      {notice ? <p className="subtle" style={{ color: "#166534" }}>{notice}</p> : null}
       {loading ? <p>Loading...</p> : null}
       {error ? <p style={{ color: "#b91c1c" }}>{error}</p> : null}
 
-      <section className="panel" style={{ padding: 14, marginBottom: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Case Study Runs</h2>
-          <button
-            onClick={() => void load()}
-            style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: "6px 10px", background: "white" }}
-          >
-            Refresh
-          </button>
-        </div>
-        <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-          {items.length === 0 ? (
-            <div style={{ color: "#64748b" }}>No case study runs marked yet.</div>
-          ) : (
-            items.map((item) => (
-              <div key={item.run_id} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                  <div>
-                    <strong>{item.title || item.run_id}</strong>
-                    <div style={{ color: "#475569", fontSize: 13 }}>
-                      status: {item.status} | focus: {item.focus || "n/a"}
+      <div className="analytics-grid">
+        <section className="panel" style={{ padding: 14 }}>
+          <h2 style={{ marginTop: 0, fontSize: 18 }}>Saved Case Studies</h2>
+          <div style={{ display: "grid", gap: 10 }}>
+            {items.length === 0 ? (
+              <div className="subtle">No case study runs marked yet.</div>
+            ) : (
+              items.map((item) => (
+                <div key={item.run_id} className="family-card">
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                    <div>
+                      <strong>{item.title || item.run_id}</strong>
+                      <div className="subtle">status: {item.status} | focus: {item.focus || "n/a"}</div>
                     </div>
+                    <a href={`/runs/${encodeURIComponent(item.run_id)}`}>Open run</a>
                   </div>
-                  <Link href={`/runs/${encodeURIComponent(item.run_id)}`} style={{ textDecoration: "underline" }}>
-                    Open run
-                  </Link>
+                  <div className="header-actions" style={{ marginTop: 8 }}>
+                    <a href={`/compare?left_run_id=${encodeURIComponent(item.run_id)}&mode=aligned`} className="kpi-chip">
+                      Compare from run
+                    </a>
+                    <button onClick={() => {
+                      copyText(`${window.location.origin}/runs/${encodeURIComponent(item.run_id)}`);
+                      setNotice("Copied run link.");
+                    }}>
+                      Copy run link
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
+              ))
+            )}
+          </div>
+        </section>
 
-      <section className="panel" style={{ padding: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Evaluation Benchmark Subsets</h2>
-          <button
-            onClick={() => void handleAutoBuild()}
-            style={{ border: "1px solid #334155", borderRadius: 8, padding: "6px 10px", background: "white" }}
-          >
-            Auto-build baseline subsets
-          </button>
-        </div>
-        {autoBuildResult ? (
-          <pre
-            style={{
-              marginTop: 8,
-              padding: 8,
-              background: "#f8fafc",
-              border: "1px solid #e2e8f0",
-              borderRadius: 8,
-              overflowX: "auto",
-              fontSize: 12,
-            }}
-          >
-            {autoBuildResult}
-          </pre>
-        ) : null}
-        <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
-          <thead>
-            <tr style={{ textAlign: "left", borderBottom: "1px solid #e2e8f0" }}>
-              <th style={{ padding: "6px 4px" }}>Subset</th>
-              <th style={{ padding: "6px 4px" }}>Run</th>
-              <th style={{ padding: "6px 4px" }}>Rationale</th>
-            </tr>
-          </thead>
-          <tbody>
+        <section className="panel" style={{ padding: 14 }}>
+          <h2 style={{ marginTop: 0, fontSize: 18 }}>Benchmark Subsets</h2>
+          {autoBuildResult ? <pre className="code-panel">{autoBuildResult}</pre> : null}
+          <div style={{ display: "grid", gap: 8 }}>
             {benchmarks.map((row) => (
-              <tr key={`${row.subset_name}-${row.run_id}`} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                <td style={{ padding: "6px 4px" }}>{row.subset_name}</td>
-                <td style={{ padding: "6px 4px" }}>
-                  <Link href={`/runs/${encodeURIComponent(row.run_id)}`} style={{ textDecoration: "underline" }}>
-                    {row.run_id.slice(0, 16)}
-                  </Link>
-                </td>
-                <td style={{ padding: "6px 4px" }}>{row.rationale || "-"}</td>
-              </tr>
+              <div key={`${row.subset_name}-${row.run_id}`} className="metric-card">
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <strong>{row.subset_name}</strong>
+                  <a href={`/runs/${encodeURIComponent(row.run_id)}`}>{row.run_id.slice(0, 16)}</a>
+                </div>
+                <div className="subtle">{row.rationale || "-"}</div>
+              </div>
             ))}
-          </tbody>
-        </table>
-      </section>
+          </div>
+        </section>
+      </div>
     </main>
   );
 }

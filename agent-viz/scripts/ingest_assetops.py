@@ -326,7 +326,21 @@ def infer_openclaw_outcome(
         return "fail"
     if has_assistant_stop:
         joined = " ".join(assistant_final_text).lower()
-        if any(token in joined for token in ("failed", "cannot", "can't", "unable", "error")):
+        failure_phrases = (
+            "fetch failed",
+            "request failed",
+            "tool returned an error",
+            "the tool returned an error",
+            "i could not complete",
+            "i couldn't complete",
+            "i was unable to",
+            "i can't access",
+            "i cannot access",
+            "i can't confirm",
+            "i cannot confirm",
+            "i'm unable to",
+        )
+        if has_tool_error and any(phrase in joined for phrase in failure_phrases):
             return "fail"
         return "success"
     if has_tool_error:
@@ -337,10 +351,12 @@ def infer_openclaw_outcome(
 def infer_openclaw_failure_category(
     outcome: str,
     all_steps: list[DerivedStep],
+    scenario: str | None,
     has_timeout: bool,
     has_missing_file: bool,
     has_auth_error: bool,
 ) -> str | None:
+    scenario_lower = (scenario or "").lower()
     if outcome != "fail":
         if any(step.error_flag for step in all_steps):
             return "partial_recovery"
@@ -351,6 +367,27 @@ def infer_openclaw_failure_category(
         return "timeout_failure"
     if has_missing_file:
         return "missing_tool"
+    fetch_failure_steps = [
+        step
+        for step in all_steps
+        if step.tool_name == "web_fetch"
+        and step.error_flag
+        and ("fetch failed" in ((step.text or "").lower()) or "fetch failed" in ((step.error_type or "").lower()))
+    ]
+    if fetch_failure_steps:
+        httpstat_status = re.search(r"httpstat\.us/(\d{3})", scenario_lower)
+        if httpstat_status:
+            status_code = httpstat_status.group(1)
+            if status_code == "404":
+                return "http_not_found"
+            if status_code == "429":
+                return "rate_limited"
+            if status_code.startswith("4"):
+                return "http_client_error"
+            if status_code.startswith("5"):
+                return "http_server_error"
+            return "upstream_http_error"
+        return "web_fetch_failure"
     retry_events = [step for step in all_steps if (step.retry_count or 0) > 0]
     if retry_events:
         return "repeated_retry"
@@ -682,6 +719,7 @@ def derive_from_openclaw_session_rows(
         failure_category = infer_openclaw_failure_category(
             outcome=outcome,
             all_steps=derived_steps,
+            scenario=scenario,
             has_timeout=has_timeout,
             has_missing_file=has_missing_file,
             has_auth_error=has_auth_error,
@@ -1002,6 +1040,7 @@ def build_labels_for_run(
     # Tool failure / misuse detector
     bad_tool_events = []
     wrong_tool_events = []
+    fetch_failure_events = []
     expected_tools = set()
     if run.expected_workflow:
         workflow_obj = json.loads(run.expected_workflow)
@@ -1014,6 +1053,10 @@ def build_labels_for_run(
         status = (step.status or "").lower()
         if status in {"failure", "warning", "timeout"}:
             bad_tool_events.append(step.event_id)
+        if step.tool_name == "web_fetch" and (
+            "fetch failed" in ((step.text or "").lower()) or "fetch failed" in ((step.error_type or "").lower())
+        ):
+            fetch_failure_events.append(step.event_id)
         if step.tool_name and expected_tools and step.tool_name not in expected_tools:
             wrong_tool_events.append(step.event_id)
     if bad_tool_events:
@@ -1030,6 +1073,31 @@ def build_labels_for_run(
             confidence=0.92,
             reason_payload={"unexpected_tool_events": wrong_tool_events, "expected_tools": sorted(expected_tools)},
         )
+    if fetch_failure_events:
+        scenario_lower = (run.scenario or "").lower()
+        status_match = re.search(r"httpstat\.us/(\d{3})", scenario_lower)
+        if status_match:
+            status_code = status_match.group(1)
+            label = (
+                "http_not_found" if status_code == "404"
+                else "rate_limited" if status_code == "429"
+                else "http_client_error" if status_code.startswith("4")
+                else "http_server_error" if status_code.startswith("5")
+                else "upstream_http_error"
+            )
+            add_label(
+                label,
+                label_type="heuristic",
+                confidence=0.91,
+                reason_payload={"fetch_failure_events": fetch_failure_events, "status_code_hint": status_code},
+            )
+        else:
+            add_label(
+                "web_fetch_failure",
+                label_type="heuristic",
+                confidence=0.83,
+                reason_payload={"fetch_failure_events": fetch_failure_events},
+            )
 
     # Early quit detector
     has_verification = any(step.event_type == "verification" for step in steps)

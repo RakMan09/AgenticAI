@@ -928,9 +928,10 @@ def upsert_case_study(run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def fetch_case_studies(status: str | None = None, limit: int = 200, offset: int = 0) -> list[dict[str, Any]]:
-    db = duckdb.connect(get_db_path(), read_only=False)
+    db = duckdb.connect(get_db_path(), read_only=True)
     try:
-        ensure_app_support_tables(db)
+        if not table_exists(db, "case_studies"):
+            return []
         where = ""
         params: list[Any] = []
         if status and status != "all":
@@ -962,9 +963,10 @@ def fetch_case_studies(status: str | None = None, limit: int = 200, offset: int 
 
 
 def fetch_case_study(run_id: str) -> dict[str, Any] | None:
-    db = duckdb.connect(get_db_path(), read_only=False)
+    db = duckdb.connect(get_db_path(), read_only=True)
     try:
-        ensure_app_support_tables(db)
+        if not table_exists(db, "case_studies"):
+            return None
         row = db.execute(
             "SELECT run_id, title, focus, status, created_at, updated_at FROM case_studies WHERE run_id = ?",
             [run_id],
@@ -1008,9 +1010,10 @@ def insert_review_note(run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def fetch_review_notes(run_id: str, limit: int = 200, offset: int = 0) -> list[dict[str, Any]]:
-    db = duckdb.connect(get_db_path(), read_only=False)
+    db = duckdb.connect(get_db_path(), read_only=True)
     try:
-        ensure_app_support_tables(db)
+        if not table_exists(db, "review_notes"):
+            return []
         rows = db.execute(
             """
             SELECT id, run_id, reviewer, label, note, created_at
@@ -1069,9 +1072,10 @@ def assign_benchmark_subset(run_id: str, payload: dict[str, Any]) -> dict[str, A
 
 
 def fetch_benchmark_subsets(subset_name: str | None = None, limit: int = 500, offset: int = 0) -> list[dict[str, Any]]:
-    db = duckdb.connect(get_db_path(), read_only=False)
+    db = duckdb.connect(get_db_path(), read_only=True)
     try:
-        ensure_app_support_tables(db)
+        if not table_exists(db, "benchmark_subsets"):
+            return []
         where = ""
         params: list[Any] = []
         if subset_name:
