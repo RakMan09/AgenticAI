@@ -6,10 +6,7 @@ __pycache__/
 # Node
 node_modules/
 .next/
-
-# Local data artifacts
-data/normalized/*.jsonl
-db/*.duckdb
+.next_*/
 
 # OS
 .DS_Store

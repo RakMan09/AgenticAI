@@ -5,6 +5,9 @@
 - Files:
   - `openclaw_session_trace_1.jsonl`
   - `openclaw_session_trace_2.jsonl`
+  - `openclaw_session_trace_3.jsonl`
+  - `openclaw_session_trace_4.jsonl`
+  - `openclaw_session_trace_5.jsonl`
   - `readme.txt`
   - `dataset_summary.txt`
 
@@ -12,6 +15,7 @@ These are raw session logs where:
 - tool calls are frequently embedded inside `message.role="assistant"` content items with `type="toolCall"`
 - tool outputs appear as `message.role="toolResult"`
 - runs are derived during ingestion as user-turn trajectories
+- duplicate OpenClaw turns are deduplicated during ingestion by stable `session_id` + `user_message_id`; `openclaw_session_trace_3.jsonl` and `openclaw_session_trace_4.jsonl` are prefix snapshots of `openclaw_session_trace_5.jsonl`
 
 ## Secondary Dataset (Synthetic Fallback)
 - Directory: `data/raw/project1_event_runs/generated/`

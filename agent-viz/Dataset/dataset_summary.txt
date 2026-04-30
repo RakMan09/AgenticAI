@@ -9,6 +9,20 @@ Files:
    - Second real OpenClaw session trace
    - Contains fresh-session bootstrap behavior, internal read tool calls, successful reads, missing-file ENOENT errors, one successful task, and one failed task
 
+3. openclaw_session_trace_3.jsonl
+   - Additional real OpenClaw session trace collected on 2026-04-30
+   - Contains 3 user turns with read/fetch activity and tool-result failures
+
+4. openclaw_session_trace_4.jsonl
+   - Additional real OpenClaw session trace collected on 2026-04-30
+   - Extends openclaw_session_trace_3.jsonl; trace 3 is a prefix snapshot of trace 4
+   - Contains 6 user turns with read/fetch/activity, reset, and UI-oriented interactions
+
+5. openclaw_session_trace_5.jsonl
+   - Fuller export of session ae9277cf-cc0f-4f84-bb2a-81f24c8357f3 collected on 2026-04-30
+   - Extends openclaw_session_trace_3.jsonl and openclaw_session_trace_4.jsonl
+   - Contains complex tool tasks with retries, HTTP failures, and recovery behavior
+
 Counts:
 Session 1
 - user messages: 31
@@ -24,6 +38,36 @@ Session 2
 - tool results: 7
 - embedded tool calls: 7
 - failed tool results: 5
+
+Session 3
+- user messages: 3
+- assistant messages: 11
+- tool results: 21
+- embedded tool calls: 21
+- failed tool results: 3
+
+Session 4
+- user messages: 6
+- assistant messages: 19
+- tool results: 32
+- embedded tool calls: 32
+- failed tool results: 3
+
+Session 5
+- user messages: 13
+- assistant messages: 53
+- tool results: 63
+- embedded tool calls: 63
+- failed tool results: 24
+
+Current ingestion result with all five files:
+- deduplicated runs: 47
+- raw events / derived steps: 359
+- outcomes: 38 success, 9 fail, 0 unknown
+
+Overlap note:
+- openclaw_session_trace_3.jsonl and openclaw_session_trace_4.jsonl are prefixes of openclaw_session_trace_5.jsonl.
+- The ingestion pipeline deduplicates OpenClaw turns by session_id + user_message_id before writing normalized traces and DuckDB tables.
 
 Important format notes:
 - Tool calls are often embedded inside assistant message.content as items with type="toolCall"

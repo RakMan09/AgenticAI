@@ -2016,14 +2016,43 @@ def ingest(args: argparse.Namespace) -> int:
         print("[ERROR] Ingestion produced 0 runs. Check canonical raw files and manifest.")
         return 1
 
-    # Deduplicate runs by run_id; keep canonical source over legacy if clash occurs.
+    def run_dedupe_key(run: DerivedRun) -> str:
+        if run.source == "openclaw_real" and run.metadata:
+            try:
+                metadata = json.loads(run.metadata)
+            except json.JSONDecodeError:
+                metadata = {}
+            if isinstance(metadata, dict):
+                session_id = shorten_text(metadata.get("session_id"))
+                user_message_id = shorten_text(metadata.get("user_message_id"))
+                if session_id and user_message_id:
+                    return f"openclaw:{session_id}:{user_message_id}"
+        return f"run_id:{run.run_id}"
+
+    def replacement_score(run: DerivedRun) -> tuple[int, str]:
+        source_file = ""
+        if run.metadata:
+            try:
+                metadata = json.loads(run.metadata)
+            except json.JSONDecodeError:
+                metadata = {}
+            if isinstance(metadata, dict):
+                source_file = shorten_text(metadata.get("source_file")) or ""
+        return (run.num_steps, source_file)
+
+    # Deduplicate runs by stable OpenClaw turn identity; keep canonical source over legacy if clash occurs.
     run_by_id: dict[str, DerivedRun] = {}
     for run in runs:
-        if run.run_id not in run_by_id:
-            run_by_id[run.run_id] = run
+        dedupe_key = run_dedupe_key(run)
+        if dedupe_key not in run_by_id:
+            run_by_id[dedupe_key] = run
             continue
-        if run_by_id[run.run_id].source == "legacy" and run.source != "legacy":
-            run_by_id[run.run_id] = run
+        current = run_by_id[dedupe_key]
+        if current.source == "legacy" and run.source != "legacy":
+            run_by_id[dedupe_key] = run
+            continue
+        if current.source == run.source and replacement_score(run) > replacement_score(current):
+            run_by_id[dedupe_key] = run
     runs = sorted(run_by_id.values(), key=lambda row: row.run_id)
 
     # Keep steps only for retained run IDs.

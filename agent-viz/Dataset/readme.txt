@@ -75,11 +75,18 @@ user
 -> assistant (final report)
 
 What to use as the primary dataset
-Use the two raw session JSONL files as the primary dataset.
+Use the five raw session JSONL files as the primary dataset.
 
 Recommended priority:
 1. <SESSION_1_FILE>.jsonl
 2. <SESSION_2_FILE>.jsonl
+3. <SESSION_3_FILE>.jsonl
+4. <SESSION_4_FILE>.jsonl
+5. <SESSION_5_FILE>.jsonl
+
+Overlap note:
+- openclaw_session_trace_3.jsonl and openclaw_session_trace_4.jsonl are prefix snapshots of openclaw_session_trace_5.jsonl.
+- The ingestion pipeline deduplicates OpenClaw user turns by session_id + user_message_id so both files can remain in the dataset folder without double-counting repeated turns.
 
 Use dataset_summary.txt for orientation only.
 It is not the source of truth.
