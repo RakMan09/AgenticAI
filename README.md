@@ -28,9 +28,9 @@ The frontend defaults to `http://127.0.0.1:8001` for the API.
 ## Current Highlights
 
 - trajectory-centric run explorer with failure-family grouping
-- run detail diagnosis with emergence, workflow, gap, and intervention views
-- compare mode with divergence summaries and semantic alignment
-- analytics with graph-based summaries, emergence heatmaps, and run scatterplots
+- compact run detail diagnosis with a click-to-inspect trace ribbon, selected-step context, emergence, workflow, gap, and intervention views
+- compare mode with multi-run selection, cumulative error growth charting, divergence summaries, and semantic alignment
+- analytics with compact graph-based summaries, emergence heatmaps, and run scatterplots
 - case-study workflow with reviewer notes and baseline benchmark subset building
 
 For full setup details, see:

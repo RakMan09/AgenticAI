@@ -1,12 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   assignBenchmarkSubset,
-  createManualAnnotation,
   createReviewNote,
   fetchAnnotations,
   fetchFailureSummary,
@@ -29,6 +27,7 @@ import type { AnnotationRow, FailureSummary, ReviewNoteRow, RunDetail, StepRow }
 
 type ExpandState = Record<number, boolean>;
 type StepTypeFilter = "all" | "thought" | "action" | "observation" | "tool_call" | "unknown";
+type RibbonDetailMode = "selected" | "errors" | "all" | null;
 
 function parseMaybeJson(raw: string | Record<string, unknown> | null): string {
   if (!raw) return "";
@@ -91,9 +90,101 @@ function annotationLabel(annotation: AnnotationRow) {
   return normalizeLabel(annotation.label);
 }
 
+function compactStepLabel(step: StepRow): string {
+  if (step.tool_name) return step.tool_name;
+  if (step.event_type === "user_message") return "user";
+  if (step.event_type === "assistant_message") return "answer";
+  if (step.event_type === "assistant_thinking") return "think";
+  if (step.event_type === "tool_result") return step.error_flag ? "tool error" : "result";
+  return step.display_step_type.replace("_", " ");
+}
+
+function compactStepTitle(step: StepRow): string {
+  const label = compactStepLabel(step);
+  const status = step.status ? ` | ${step.status}` : "";
+  const text = step.text ? ` | ${step.text.slice(0, 120)}` : "";
+  return `Step ${step.step_idx}: ${label}${status}${text}`;
+}
+
 function copyText(value: string) {
   if (typeof window === "undefined") return;
   void navigator.clipboard.writeText(value);
+}
+
+function stepDoingText(step: StepRow): string {
+  return step.inferred_intent || inferStepIntent(step);
+}
+
+function RibbonStepCard({
+  step,
+  relatedLabels,
+  isExpanded,
+  onToggle,
+}: {
+  step: StepRow;
+  relatedLabels: AnnotationRow[];
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <article className={`ribbon-detail-card${step.error_flag ? " ribbon-detail-card-error" : ""}`}>
+      <div className="ribbon-detail-card-header">
+        <div className="header-actions">
+          <strong>Step {step.step_idx}</strong>
+          <span className="pill" style={stepTypeStyle(step.display_step_type)}>{step.display_step_type}</span>
+          {step.tool_name ? <span className="kpi-chip">tool: {step.tool_name}</span> : null}
+          {step.error_flag ? <span className="pill" style={{ background: "#fee2e2", color: "#b91c1c" }}>error</span> : null}
+        </div>
+        <div className="header-actions">
+          <button onClick={onToggle}>{isExpanded ? "Hide details" : "More details"}</button>
+          <button onClick={() => copyText(step.text ?? "")} disabled={!step.text}>Copy text</button>
+        </div>
+      </div>
+      <div className="subtle">
+        {formatDateTime(step.timestamp)} | intent: {inferStepIntent(step)}
+      </div>
+      <div className="ribbon-doing-line">
+        <strong>Doing</strong>
+        <span>{stepDoingText(step)}</span>
+      </div>
+      <p className={`ribbon-detail-text${isExpanded ? " ribbon-detail-text-expanded" : ""}`}>{step.text || "(no text)"}</p>
+      {relatedLabels.length ? (
+        <div className="ribbon-label-row">
+          {relatedLabels.map((annotation) => (
+            <span key={`${annotation.label}-${annotation.label_type}`} className="pill" style={labelTypeStyle(annotation.label_type)}>
+              {annotationLabel(annotation)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {isExpanded ? (
+        <div className="analysis-grid">
+        <div>
+          <strong>Structured fields</strong>
+          <div className="subtle">agent: {step.agent_id ?? "-"} | status: {step.status ?? "-"}</div>
+          <div className="subtle">error type: {step.error_type ?? "-"}</div>
+          <div className="subtle">evidence: {step.evidence_summary ?? "-"}</div>
+          <div className="subtle">next action: {step.intended_next_action ?? "-"}</div>
+        </div>
+        <div className="ribbon-payload-stack">
+          {step.tool_input ? (
+            <div>
+              <strong>Tool input</strong>
+              <pre className="code-panel code-panel-compact">{parseMaybeJson(step.tool_input)}</pre>
+            </div>
+          ) : null}
+          {step.tool_output ? (
+            <div>
+              <strong>Tool output</strong>
+              <pre className="code-panel code-panel-compact">{parseMaybeJson(step.tool_output)}</pre>
+            </div>
+          ) : null}
+        </div>
+      </div>
+      ) : null}
+    </article>
+  );
 }
 
 export default function RunDetailPage({ params }: { params: { run_id: string } }) {
@@ -104,8 +195,6 @@ export default function RunDetailPage({ params }: { params: { run_id: string } }
   const [annotations, setAnnotations] = useState<AnnotationRow[]>([]);
   const [gapSignals, setGapSignals] = useState<AnnotationRow[]>([]);
   const [failureSummary, setFailureSummary] = useState<FailureSummary | null>(null);
-  const [manualLabel, setManualLabel] = useState("");
-  const [savingLabel, setSavingLabel] = useState(false);
   const [reviewNotes, setReviewNotes] = useState<ReviewNoteRow[]>([]);
   const [reviewer, setReviewer] = useState("professor");
   const [reviewLabel, setReviewLabel] = useState("");
@@ -121,11 +210,11 @@ export default function RunDetailPage({ params }: { params: { run_id: string } }
   const [errorOnly, setErrorOnly] = useState(false);
 
   const [expanded, setExpanded] = useState<ExpandState>({});
+  const [ribbonDetailMode, setRibbonDetailMode] = useState<RibbonDetailMode>(null);
+  const [ribbonStepIdx, setRibbonStepIdx] = useState<number | null>(null);
   const [loadingRun, setLoadingRun] = useState(true);
   const [loadingSteps, setLoadingSteps] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const parentRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => setDebouncedQuery(query), 180);
@@ -208,13 +297,6 @@ export default function RunDetailPage({ params }: { params: { run_id: string } }
   }, [params.run_id]);
 
   const firstErrorIndex = useMemo(() => steps.findIndex((step) => step.error_flag), [steps]);
-  const rowVirtualizer = useVirtualizer({
-    count: steps.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 170,
-    overscan: 8,
-  });
-
   const errorCount = useMemo(() => steps.filter((step) => step.error_flag).length, [steps]);
   const uniqueOverlays = useMemo(() => dedupeAnnotations(annotations), [annotations]);
   const uniqueGapSignals = useMemo(() => dedupeAnnotations(gapSignals), [gapSignals]);
@@ -239,20 +321,23 @@ export default function RunDetailPage({ params }: { params: { run_id: string } }
     return steps.filter((step) => items.has(step.step_idx));
   }, [failureSummary, firstErrorStep, steps]);
 
-  const toggleExpanded = (stepIdx: number) => {
-    setExpanded((prev) => ({ ...prev, [stepIdx]: !prev[stepIdx] }));
-  };
-
   const jumpToStep = (targetIdx: number) => {
-    const index = steps.findIndex((step) => step.step_idx === targetIdx);
-    if (index >= 0) {
-      rowVirtualizer.scrollToIndex(index, { align: "center" });
-      setExpanded((prev) => ({ ...prev, [targetIdx]: true }));
-    }
+    showRibbonStep(targetIdx);
   };
 
   const jumpToFirstError = () => {
     if (firstErrorStep) jumpToStep(firstErrorStep.step_idx);
+  };
+
+  const showRibbonStep = (targetIdx: number) => {
+    setRibbonStepIdx(targetIdx);
+    setRibbonDetailMode("selected");
+  };
+
+  const collapseAllSteps = () => {
+    setExpanded({});
+    setRibbonDetailMode(null);
+    setRibbonStepIdx(null);
   };
 
   const resetFilters = () => {
@@ -260,27 +345,6 @@ export default function RunDetailPage({ params }: { params: { run_id: string } }
     setDebouncedQuery("");
     setStepTypeFilter("all");
     setErrorOnly(false);
-  };
-
-  const submitManualLabel = async () => {
-    const trimmed = manualLabel.trim();
-    if (!trimmed) return;
-    setSavingLabel(true);
-    try {
-      await createManualAnnotation(params.run_id, {
-        label: trimmed,
-        step_idx: firstErrorStep?.step_idx,
-        reason_payload: { note: "Added from run diagnosis view" },
-      });
-      const refreshed = await fetchAnnotations(params.run_id);
-      setAnnotations(refreshed.items);
-      setManualLabel("");
-      setActionNotice(`Added manual label: ${trimmed}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save annotation");
-    } finally {
-      setSavingLabel(false);
-    }
   };
 
   const submitReviewNote = async () => {
@@ -339,6 +403,13 @@ export default function RunDetailPage({ params }: { params: { run_id: string } }
       width: `${(value / total) * 100}%`,
     }));
   }, [stepTypeCounts, steps.length]);
+
+  const ribbonDetailSteps = useMemo(() => {
+    if (ribbonDetailMode === "selected" && ribbonStepIdx !== null) {
+      return steps.filter((step) => step.step_idx === ribbonStepIdx);
+    }
+    return [];
+  }, [ribbonDetailMode, ribbonStepIdx, steps]);
 
   if (loadingRun) {
     return <main className="container">Loading run...</main>;
@@ -415,6 +486,68 @@ export default function RunDetailPage({ params }: { params: { run_id: string } }
         </div>
       </section>
 
+      <section className="panel" style={{ padding: 14, marginBottom: 12 }}>
+        <div className="section-caption">
+          <div>
+            <span className="section-kicker">Trace Ribbon</span>
+            <h2 className="section-title">Single-Line Execution Timeline</h2>
+          </div>
+          <div className="header-actions">
+            <button onClick={collapseAllSteps} disabled={!ribbonDetailMode}>Clear selected step</button>
+          </div>
+        </div>
+        <div className="timeline-legend" style={{ marginBottom: 10 }}>
+          <span><i className="legend-dot timeline-dot-thought" />thought</span>
+          <span><i className="legend-dot timeline-dot-tool_call" />tool call</span>
+          <span><i className="legend-dot timeline-dot-observation" />result</span>
+          <span><i className="legend-dot timeline-dot-action" />answer</span>
+          <span><i className="legend-dot timeline-dot-error" />error</span>
+        </div>
+        <div className="trace-ribbon" aria-label="compact trace timeline">
+          {steps.map((step) => {
+            const isFirstError = firstErrorStep?.step_idx === step.step_idx;
+            const isSelected = ribbonStepIdx === step.step_idx;
+            return (
+              <button
+                key={`ribbon-${step.step_idx}`}
+                className={`trace-node trace-node-${step.display_step_type}${step.error_flag ? " trace-node-error" : ""}${isFirstError ? " trace-node-first-error" : ""}${isSelected ? " trace-node-selected" : ""}`}
+                title={compactStepTitle(step)}
+                onClick={() => showRibbonStep(step.step_idx)}
+                aria-pressed={isSelected}
+              >
+                <span className="trace-node-index">{step.step_idx}</span>
+                <span className="trace-node-label">{compactStepLabel(step)}</span>
+                {isFirstError ? <span className="trace-node-badge">first error</span> : null}
+              </button>
+            );
+          })}
+        </div>
+        {ribbonDetailSteps.length ? (
+          <div className="ribbon-detail-panel">
+            <div className="ribbon-detail-panel-header">
+              <strong>Selected step</strong>
+              <span className="subtle">Click another ribbon segment to inspect that step here.</span>
+            </div>
+            <div className="ribbon-detail-list">
+              {ribbonDetailSteps.map((step) => (
+                <RibbonStepCard
+                  key={`ribbon-detail-${step.step_idx}`}
+                  step={step}
+                  relatedLabels={annotations.filter((annotation) => annotation.step_idx === step.step_idx)}
+                  isExpanded={expanded[step.step_idx] ?? false}
+                  onToggle={() => setExpanded((prev) => ({ ...prev, [step.step_idx]: !(prev[step.step_idx] ?? false) }))}
+                />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="ribbon-empty-state">
+            <strong>Select a step from the ribbon</strong>
+            <span>The selected step will open here with what it is doing, its trace text, labels, and optional details.</span>
+          </div>
+        )}
+      </section>
+
       <div className="viewer-layout">
         <aside className="panel" style={{ padding: 12, alignSelf: "start" }}>
           <h2 style={{ marginTop: 0, fontSize: 18 }}>Run Snapshot</h2>
@@ -487,24 +620,18 @@ export default function RunDetailPage({ params }: { params: { run_id: string } }
           <section className="analysis-grid">
             <article className="panel" style={{ padding: 14 }}>
               <h2 style={{ marginTop: 0, fontSize: 18 }}>Failure Emergence</h2>
-              <div className="subtle" style={{ marginBottom: 10 }}>
-                Highlights the transition from setup into failure, anchored by the first error step.
-              </div>
               <div className="timeline-strip" style={{ marginBottom: 12 }}>
                 <div className="timeline-fill" style={{ width: "100%" }} />
                 {firstErrorStep ? (
                   <div className="timeline-marker" style={{ left: `${clampPercent(firstErrorStep.step_idx, Math.max(run.num_steps, 1))}%` }} />
                 ) : null}
               </div>
-              <div style={{ display: "grid", gap: 8 }}>
+              <div className="compact-moment-list">
                 {keyMoments.map((step) => (
-                  <button key={step.step_idx} className="moment-card" onClick={() => jumpToStep(step.step_idx)}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                      <strong>Step {step.step_idx}</strong>
-                      <span className="pill" style={stepTypeStyle(step.display_step_type)}>{step.display_step_type}</span>
-                    </div>
-                    <div className="subtle">{inferStepIntent(step)}</div>
-                    <div style={{ color: "#334155", whiteSpace: "pre-wrap" }}>{step.text ?? "(no text)"}</div>
+                  <button key={step.step_idx} className="compact-moment-row" onClick={() => jumpToStep(step.step_idx)}>
+                    <strong>Step {step.step_idx}</strong>
+                    <span className="pill" style={stepTypeStyle(step.display_step_type)}>{step.display_step_type}</span>
+                    <span className="subtle">{inferStepIntent(step)}</span>
                   </button>
                 ))}
               </div>
@@ -618,93 +745,6 @@ export default function RunDetailPage({ params }: { params: { run_id: string } }
                     </div>
                   ))}
                 </div>
-              </div>
-            </div>
-          </section>
-
-          <section className="panel" style={{ padding: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 12 }}>
-              <h2 style={{ margin: 0, fontSize: 18 }}>Trace Timeline</h2>
-              <div className="header-actions">
-                <input value={manualLabel} onChange={(e) => setManualLabel(e.target.value)} placeholder="Add manual label" />
-                <button onClick={() => void submitManualLabel()} disabled={savingLabel || !manualLabel.trim()}>{savingLabel ? "Saving..." : "Save label"}</button>
-              </div>
-            </div>
-
-            <div ref={parentRef} style={{ maxHeight: "72vh", overflow: "auto", paddingRight: 4 }}>
-              <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: "relative" }}>
-                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                  const step = steps[virtualRow.index];
-                  const isExpanded = expanded[step.step_idx] ?? step.error_flag;
-                  const relatedLabels = annotations.filter((annotation) => annotation.step_idx === step.step_idx);
-                  return (
-                    <article
-                      key={step.step_idx}
-                      ref={rowVirtualizer.measureElement}
-                      data-index={virtualRow.index}
-                      className="trace-card"
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        transform: `translateY(${virtualRow.start}px)`,
-                        background: step.error_flag ? "#fff7f7" : "white",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                          <strong>Step {step.step_idx}</strong>
-                          <span className="pill" style={stepTypeStyle(step.display_step_type)}>{step.display_step_type}</span>
-                          {step.tool_name ? <span className="kpi-chip">tool: {step.tool_name}</span> : null}
-                          {step.error_flag ? <span className="pill" style={{ background: "#fee2e2", color: "#b91c1c" }}>error</span> : null}
-                        </div>
-                        <button onClick={() => toggleExpanded(step.step_idx)}>{isExpanded ? "Collapse" : "Expand"}</button>
-                      </div>
-
-                      <div className="subtle" style={{ marginBottom: 8 }}>
-                        {formatDateTime(step.timestamp)} | intent: {inferStepIntent(step)}
-                      </div>
-                      <p style={{ marginTop: 0, whiteSpace: "pre-wrap" }}>{step.text || "(no text)"}</p>
-
-                      {relatedLabels.length ? (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-                          {relatedLabels.map((annotation) => (
-                            <span key={`${annotation.label}-${annotation.label_type}`} className="pill" style={labelTypeStyle(annotation.label_type)}>
-                              {annotationLabel(annotation)}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      {isExpanded ? (
-                        <div className="analysis-grid">
-                          <div>
-                            <strong>Structured fields</strong>
-                            <div className="subtle">agent: {step.agent_id ?? "-"} | status: {step.status ?? "-"}</div>
-                            <div className="subtle">error type: {step.error_type ?? "-"}</div>
-                            <div className="subtle">evidence: {step.evidence_summary ?? "-"}</div>
-                            <div className="subtle">next action: {step.intended_next_action ?? "-"}</div>
-                          </div>
-                          <div>
-                            {step.tool_input ? (
-                              <>
-                                <strong>Tool input</strong>
-                                <pre className="code-panel">{parseMaybeJson(step.tool_input)}</pre>
-                              </>
-                            ) : null}
-                            {step.tool_output ? (
-                              <>
-                                <strong>Tool output</strong>
-                                <pre className="code-panel">{parseMaybeJson(step.tool_output)}</pre>
-                              </>
-                            ) : null}
-                          </div>
-                        </div>
-                      ) : null}
-                    </article>
-                  );
-                })}
               </div>
             </div>
           </section>

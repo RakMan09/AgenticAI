@@ -14,6 +14,8 @@ import { fetchRuns } from "../lib/api";
 import type { RunRow } from "../lib/types";
 
 const columnHelper = createColumnHelper<RunRow>();
+const PAGE_SIZE = 20;
+const SUMMARY_LIMIT = 5000;
 
 function parseOptionalNumber(value: string): number | undefined {
   if (!value.trim()) return undefined;
@@ -24,23 +26,6 @@ function parseOptionalNumber(value: string): number | undefined {
 function copyText(value: string) {
   if (typeof window === "undefined") return;
   void navigator.clipboard.writeText(value);
-}
-
-function setCompareSlot(
-  runId: string,
-  slot: "left" | "right",
-  currentLeft: string,
-  currentRight: string,
-  setLeft: (value: string) => void,
-  setRight: (value: string) => void,
-) {
-  if (slot === "left") {
-    setLeft(runId);
-    if (currentRight === runId) setRight("");
-    return;
-  }
-  setRight(runId);
-  if (currentLeft === runId) setLeft("");
 }
 
 export default function HomePage() {
@@ -59,11 +44,11 @@ export default function HomePage() {
   const [maxSteps, setMaxSteps] = useState("");
   const [minErrorSteps, setMinErrorSteps] = useState("");
   const [maxErrorSteps, setMaxErrorSteps] = useState("");
-  const [compareLeft, setCompareLeft] = useState("");
-  const [compareRight, setCompareRight] = useState("");
   const [shareNotice, setShareNotice] = useState("");
+  const [pageIndex, setPageIndex] = useState(0);
 
   const [rows, setRows] = useState<RunRow[]>([]);
+  const [summaryRows, setSummaryRows] = useState<RunRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,31 +88,20 @@ export default function HomePage() {
         header: "Actions",
         cell: (info) => {
           const runId = info.row.original.run_id;
-          const selectedLeft = compareLeft === runId;
-          const selectedRight = compareRight === runId;
           return (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button
-                className={selectedLeft ? "button-selected" : undefined}
-                onClick={() => setCompareSlot(runId, "left", compareLeft, compareRight, setCompareLeft, setCompareRight)}
-              >
-                {selectedLeft ? "Left selected" : "Set left"}
-              </button>
-              <button
-                className={selectedRight ? "button-selected" : undefined}
-                onClick={() => setCompareSlot(runId, "right", compareLeft, compareRight, setCompareLeft, setCompareRight)}
-              >
-                {selectedRight ? "Right selected" : "Set right"}
-              </button>
               <a href={`/runs/${encodeURIComponent(runId)}`} className="kpi-chip">
                 Inspect
+              </a>
+              <a href={`/compare?run_ids=${encodeURIComponent(runId)}`} className="kpi-chip">
+                Compare
               </a>
             </div>
           );
         },
       }),
     ],
-    [compareLeft, compareRight],
+    [],
   );
 
   useEffect(() => {
@@ -148,8 +122,8 @@ export default function HomePage() {
     setMaxSteps(params.get("max_steps") ?? "");
     setMinErrorSteps(params.get("min_error_steps") ?? "");
     setMaxErrorSteps(params.get("max_error_steps") ?? "");
-    setCompareLeft(params.get("compare_left") ?? "");
-    setCompareRight(params.get("compare_right") ?? "");
+    const pageParam = Number(params.get("page") ?? "1");
+    setPageIndex(Number.isFinite(pageParam) && pageParam > 0 ? pageParam - 1 : 0);
   }, []);
 
   useEffect(() => {
@@ -171,8 +145,7 @@ export default function HomePage() {
       max_steps: maxSteps,
       min_error_steps: minErrorSteps,
       max_error_steps: maxErrorSteps,
-      compare_left: compareLeft,
-      compare_right: compareRight,
+      page: pageIndex > 0 ? String(pageIndex + 1) : "",
     };
     for (const [key, value] of Object.entries(entries)) {
       if (!value || value === "all") continue;
@@ -181,8 +154,7 @@ export default function HomePage() {
     const nextUrl = params.toString() ? `/?${params.toString()}` : "/";
     window.history.replaceState(null, "", nextUrl);
   }, [
-    compareLeft,
-    compareRight,
+    pageIndex,
     hasErrors,
     label,
     maxErrorSteps,
@@ -221,8 +193,8 @@ export default function HomePage() {
       max_steps: parseOptionalNumber(maxSteps),
       min_error_steps: parseOptionalNumber(minErrorSteps),
       max_error_steps: parseOptionalNumber(maxErrorSteps),
-      limit: 300,
-      offset: 0,
+      limit: PAGE_SIZE,
+      offset: pageIndex * PAGE_SIZE,
     })
       .then((data) => {
         if (!mounted) return;
@@ -248,6 +220,7 @@ export default function HomePage() {
     minErrorSteps,
     minSteps,
     outcome,
+    pageIndex,
     q,
     source,
     sortBy,
@@ -258,47 +231,100 @@ export default function HomePage() {
     tool,
   ]);
 
+  useEffect(() => {
+    let mounted = true;
+    fetchRuns({
+      outcome,
+      q,
+      tool,
+      source,
+      step_type: stepType,
+      has_errors: hasErrors,
+      label,
+      started_after: startedAfter || undefined,
+      started_before: startedBefore || undefined,
+      sort_by: sortBy,
+      sort_dir: sortDir,
+      min_steps: parseOptionalNumber(minSteps),
+      max_steps: parseOptionalNumber(maxSteps),
+      min_error_steps: parseOptionalNumber(minErrorSteps),
+      max_error_steps: parseOptionalNumber(maxErrorSteps),
+      limit: SUMMARY_LIMIT,
+      offset: 0,
+    })
+      .then((data) => {
+        if (!mounted) return;
+        setSummaryRows(data.items);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setSummaryRows([]);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [
+    hasErrors,
+    label,
+    maxErrorSteps,
+    maxSteps,
+    minErrorSteps,
+    minSteps,
+    outcome,
+    q,
+    source,
+    sortBy,
+    sortDir,
+    startedAfter,
+    startedBefore,
+    stepType,
+    tool,
+  ]);
+
+  useEffect(() => {
+    if (!loading && pageIndex > 0 && rows.length === 0) {
+      setPageIndex((current) => Math.max(0, current - 1));
+    }
+  }, [loading, pageIndex, rows.length]);
+
   const table = useReactTable({
     data: rows,
     columns,
     getCoreRowModel: getCoreRowModel(),
   });
 
-  const compareHref =
-    compareLeft && compareRight
-      ? `/compare?left_run_id=${encodeURIComponent(compareLeft)}&right_run_id=${encodeURIComponent(compareRight)}&mode=aligned`
-      : null;
+  const summarySourceRows = summaryRows.length ? summaryRows : rows;
 
   const runSummary = useMemo(() => {
     let success = 0;
     let fail = 0;
     let unknown = 0;
-    for (const row of rows) {
+    for (const row of summarySourceRows) {
       if (row.outcome === "success") success += 1;
       else if (row.outcome === "fail") fail += 1;
       else unknown += 1;
     }
     return { success, fail, unknown };
-  }, [rows]);
+  }, [summarySourceRows]);
 
-  const failureFamilies = useMemo(() => clusterRunsByFingerprint(rows).slice(0, 6), [rows]);
+  const failureFamilies = useMemo(() => clusterRunsByFingerprint(summarySourceRows).slice(0, 4), [summarySourceRows]);
 
   const trajectoryMoments = useMemo(() => {
-    const maxStepsValue = Math.max(...rows.map((row) => row.num_steps), 1);
-    return rows
+    const maxStepsValue = Math.max(...summarySourceRows.map((row) => row.num_steps), 1);
+    return summarySourceRows
       .slice()
       .sort((left, right) => {
         const leftMoment = left.first_error_step ?? left.num_steps + 5;
         const rightMoment = right.first_error_step ?? right.num_steps + 5;
         return leftMoment - rightMoment;
       })
-      .slice(0, 8)
+      .slice(0, 5)
       .map((row) => ({
         ...row,
         moment: row.first_error_step ?? row.num_steps,
         barWidth: clampPercent(row.num_steps, maxStepsValue),
       }));
-  }, [rows]);
+  }, [summarySourceRows]);
 
   const drilldownLinks = useMemo(
     () => [
@@ -326,27 +352,17 @@ export default function HomePage() {
     setMaxSteps("");
     setMinErrorSteps("");
     setMaxErrorSteps("");
-  };
-
-  const clearCompareSelection = () => {
-    setCompareLeft("");
-    setCompareRight("");
-  };
-
-  const swapCompareSelection = () => {
-    if (!compareLeft && !compareRight) return;
-    setCompareLeft(compareRight);
-    setCompareRight(compareLeft);
+    setPageIndex(0);
   };
 
   const outcomeChart = useMemo(() => {
-    const totalCount = Math.max(rows.length, 1);
+    const totalCount = Math.max(summarySourceRows.length, 1);
     return [
       { label: "success", value: runSummary.success, tone: "#16a34a", width: clampPercent(runSummary.success, totalCount) },
       { label: "fail", value: runSummary.fail, tone: "#dc2626", width: clampPercent(runSummary.fail, totalCount) },
       { label: "unknown", value: runSummary.unknown, tone: "#64748b", width: clampPercent(runSummary.unknown, totalCount) },
     ];
-  }, [rows.length, runSummary.fail, runSummary.success, runSummary.unknown]);
+  }, [summarySourceRows.length, runSummary.fail, runSummary.success, runSummary.unknown]);
 
   const shareCurrentView = () => {
     if (typeof window === "undefined") return;
@@ -355,20 +371,21 @@ export default function HomePage() {
     window.setTimeout(() => setShareNotice(""), 1800);
   };
 
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const firstVisibleRun = total === 0 ? 0 : pageIndex * PAGE_SIZE + 1;
+  const lastVisibleRun = Math.min(total, pageIndex * PAGE_SIZE + rows.length);
+
   return (
     <main className="container">
       <section className="hero-panel">
         <div>
           <p className="eyebrow">Project 1</p>
           <h1 className="hero-title">Visual Analytics for Agent Trajectories & Failure Modes</h1>
-          <p className="hero-copy">
-            Explore trajectories as cohorts, not just rows. The dashboard now emphasizes failure families,
-            emergence timing, and direct drill-down into runs that exemplify a pattern.
-          </p>
+          <p className="hero-copy">Explore trajectories as cohorts, with failure families and first-error timing visible up front.</p>
           <div className="hero-stat-grid" style={{ marginTop: 18 }}>
             <div className="hero-stat-card">
-              <span className="hero-stat-label">Visible runs</span>
-              <strong className="hero-stat-value">{rows.length}</strong>
+              <span className="hero-stat-label">Matching runs</span>
+              <strong className="hero-stat-value">{total}</strong>
             </div>
             <div className="hero-stat-card">
               <span className="hero-stat-label">Failure families</span>
@@ -390,10 +407,10 @@ export default function HomePage() {
       {shareNotice ? <p className="subtle" style={{ color: "#166534" }}>{shareNotice}</p> : null}
 
       <div className="kpi-row">
-        <span className="kpi-chip">loaded: <strong>{rows.length}</strong> / matches: <strong>{total}</strong></span>
-        <span className="kpi-chip">success: <strong>{runSummary.success}</strong></span>
-        <span className="kpi-chip">fail: <strong>{runSummary.fail}</strong></span>
-        <span className="kpi-chip">unknown: <strong>{runSummary.unknown}</strong></span>
+        <span className="kpi-chip">showing: <strong>{firstVisibleRun}-{lastVisibleRun}</strong> / matches: <strong>{total}</strong></span>
+        <span className="kpi-chip">cohort success: <strong>{runSummary.success}</strong></span>
+        <span className="kpi-chip">cohort fail: <strong>{runSummary.fail}</strong></span>
+        <span className="kpi-chip">cohort unknown: <strong>{runSummary.unknown}</strong></span>
       </div>
 
       <div className="dashboard-feature-grid" style={{ marginBottom: 16 }}>
@@ -430,7 +447,7 @@ export default function HomePage() {
               <span className="section-kicker">Distribution View</span>
               <h2 className="section-title">Fleet Snapshot</h2>
             </div>
-            <span className="subtle">Micro-graphs from the active cohort</span>
+            <span className="subtle">Micro-graphs from all matching runs</span>
           </div>
           <div style={{ display: "grid", gap: 12, marginBottom: 12 }}>
             {outcomeChart.map((item) => (
@@ -478,120 +495,112 @@ export default function HomePage() {
             <span className="section-kicker">Analysis Workspace</span>
             <h2 className="section-title">Run Explorer</h2>
           </div>
-          <div className="header-actions">
-            <span className="subtle">
-              compare left: <strong>{compareLeft ? compareLeft.slice(0, 14) : "-"}</strong>
-            </span>
-            <span className="subtle">
-              compare right: <strong>{compareRight ? compareRight.slice(0, 14) : "-"}</strong>
-            </span>
+          <span className="subtle">Inspect a run or open it directly in Compare from the table.</span>
+        </div>
+        <details className="compact-details">
+          <summary>
+            <span>Filters</span>
+            <span className="subtle">{loading ? "Loading runs..." : `${rows.length} visible runs`}</span>
+          </summary>
+          <div className="filter-grid">
+            <label>
+              Outcome
+              <select value={outcome} onChange={(e) => setOutcome(e.target.value)} style={{ width: "100%" }}>
+                <option value="all">all</option>
+                <option value="success">success</option>
+                <option value="fail">fail</option>
+                <option value="unknown">unknown</option>
+              </select>
+            </label>
+            <label>
+              Search
+              <input value={q} onChange={(e) => { setQ(e.target.value); setPageIndex(0); }} placeholder="run_id / task / scenario" style={{ width: "100%" }} />
+            </label>
+            <label>
+              Tool
+              <input value={tool} onChange={(e) => { setTool(e.target.value); setPageIndex(0); }} placeholder="tool name" style={{ width: "100%" }} />
+            </label>
+            <label>
+              Source
+              <select value={source} onChange={(e) => setSource(e.target.value)} style={{ width: "100%" }}>
+                <option value="all">all</option>
+                <option value="openclaw_real">openclaw_real</option>
+                <option value="canonical_synthetic">canonical_synthetic</option>
+                <option value="legacy">legacy</option>
+              </select>
+            </label>
+            <label>
+              Contains step type
+              <select value={stepType} onChange={(e) => setStepType(e.target.value)} style={{ width: "100%" }}>
+                <option value="all">all</option>
+                <option value="thought">thought</option>
+                <option value="action">action</option>
+                <option value="observation">observation</option>
+                <option value="tool_call">tool_call</option>
+                <option value="unknown">unknown</option>
+              </select>
+            </label>
+            <label>
+              Has errors
+              <select value={hasErrors} onChange={(e) => setHasErrors(e.target.value)} style={{ width: "100%" }}>
+                <option value="all">all</option>
+                <option value="true">true</option>
+                <option value="false">false</option>
+              </select>
+            </label>
+            <label>
+              Label contains
+              <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="annotation label" style={{ width: "100%" }} />
+            </label>
+            <label>
+              Min steps
+              <input type="number" min={0} value={minSteps} onChange={(e) => setMinSteps(e.target.value)} style={{ width: "100%" }} />
+            </label>
+            <label>
+              Max steps
+              <input type="number" min={0} value={maxSteps} onChange={(e) => setMaxSteps(e.target.value)} style={{ width: "100%" }} />
+            </label>
+            <label>
+              Min error steps
+              <input type="number" min={0} value={minErrorSteps} onChange={(e) => setMinErrorSteps(e.target.value)} style={{ width: "100%" }} />
+            </label>
+            <label>
+              Max error steps
+              <input type="number" min={0} value={maxErrorSteps} onChange={(e) => setMaxErrorSteps(e.target.value)} style={{ width: "100%" }} />
+            </label>
+            <label>
+              Started after
+              <input type="datetime-local" value={startedAfter} onChange={(e) => setStartedAfter(e.target.value)} style={{ width: "100%" }} />
+            </label>
+            <label>
+              Started before
+              <input type="datetime-local" value={startedBefore} onChange={(e) => setStartedBefore(e.target.value)} style={{ width: "100%" }} />
+            </label>
+            <label>
+              Sort by
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ width: "100%" }}>
+                <option value="started_at">started_at</option>
+                <option value="num_steps">num_steps</option>
+                <option value="error_steps">error_steps</option>
+                <option value="tool_call_steps">tool_call_steps</option>
+                <option value="run_id">run_id</option>
+                <option value="outcome">outcome</option>
+              </select>
+            </label>
+            <label>
+              Sort direction
+              <select value={sortDir} onChange={(e) => setSortDir(e.target.value as "asc" | "desc")} style={{ width: "100%" }}>
+                <option value="desc">desc</option>
+                <option value="asc">asc</option>
+              </select>
+            </label>
           </div>
-        </div>
-        <div className="header-actions" style={{ marginBottom: 10 }}>
-          {compareHref ? <a href={compareHref} className="btn-primary">Open Compare</a> : <span className="subtle">Pick both runs to compare</span>}
-          <button disabled={!compareLeft && !compareRight} onClick={swapCompareSelection}>Swap</button>
-          <button disabled={!compareLeft && !compareRight} onClick={clearCompareSelection}>Clear compare</button>
-        </div>
-
-        <div className="filter-grid">
-          <label>
-            Outcome
-            <select value={outcome} onChange={(e) => setOutcome(e.target.value)} style={{ width: "100%" }}>
-              <option value="all">all</option>
-              <option value="success">success</option>
-              <option value="fail">fail</option>
-              <option value="unknown">unknown</option>
-            </select>
-          </label>
-          <label>
-            Search
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="run_id / task / scenario" style={{ width: "100%" }} />
-          </label>
-          <label>
-            Tool
-            <input value={tool} onChange={(e) => setTool(e.target.value)} placeholder="tool name" style={{ width: "100%" }} />
-          </label>
-          <label>
-            Source
-            <select value={source} onChange={(e) => setSource(e.target.value)} style={{ width: "100%" }}>
-              <option value="all">all</option>
-              <option value="openclaw_real">openclaw_real</option>
-              <option value="canonical_synthetic">canonical_synthetic</option>
-              <option value="legacy">legacy</option>
-            </select>
-          </label>
-          <label>
-            Contains step type
-            <select value={stepType} onChange={(e) => setStepType(e.target.value)} style={{ width: "100%" }}>
-              <option value="all">all</option>
-              <option value="thought">thought</option>
-              <option value="action">action</option>
-              <option value="observation">observation</option>
-              <option value="tool_call">tool_call</option>
-              <option value="unknown">unknown</option>
-            </select>
-          </label>
-          <label>
-            Has errors
-            <select value={hasErrors} onChange={(e) => setHasErrors(e.target.value)} style={{ width: "100%" }}>
-              <option value="all">all</option>
-              <option value="true">true</option>
-              <option value="false">false</option>
-            </select>
-          </label>
-          <label>
-            Label contains
-            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="annotation label" style={{ width: "100%" }} />
-          </label>
-          <label>
-            Min steps
-            <input type="number" min={0} value={minSteps} onChange={(e) => setMinSteps(e.target.value)} style={{ width: "100%" }} />
-          </label>
-          <label>
-            Max steps
-            <input type="number" min={0} value={maxSteps} onChange={(e) => setMaxSteps(e.target.value)} style={{ width: "100%" }} />
-          </label>
-          <label>
-            Min error steps
-            <input type="number" min={0} value={minErrorSteps} onChange={(e) => setMinErrorSteps(e.target.value)} style={{ width: "100%" }} />
-          </label>
-          <label>
-            Max error steps
-            <input type="number" min={0} value={maxErrorSteps} onChange={(e) => setMaxErrorSteps(e.target.value)} style={{ width: "100%" }} />
-          </label>
-          <label>
-            Started after
-            <input type="datetime-local" value={startedAfter} onChange={(e) => setStartedAfter(e.target.value)} style={{ width: "100%" }} />
-          </label>
-          <label>
-            Started before
-            <input type="datetime-local" value={startedBefore} onChange={(e) => setStartedBefore(e.target.value)} style={{ width: "100%" }} />
-          </label>
-          <label>
-            Sort by
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ width: "100%" }}>
-              <option value="started_at">started_at</option>
-              <option value="num_steps">num_steps</option>
-              <option value="error_steps">error_steps</option>
-              <option value="tool_call_steps">tool_call_steps</option>
-              <option value="run_id">run_id</option>
-              <option value="outcome">outcome</option>
-            </select>
-          </label>
-          <label>
-            Sort direction
-            <select value={sortDir} onChange={(e) => setSortDir(e.target.value as "asc" | "desc")} style={{ width: "100%" }}>
-              <option value="desc">desc</option>
-              <option value="asc">asc</option>
-            </select>
-          </label>
-        </div>
-        <div className="header-actions" style={{ marginTop: 12 }}>
-          <button onClick={clearFilters}>Clear filters</button>
-          <button onClick={shareCurrentView}>Copy share link</button>
-          {loading ? <span className="subtle">Loading runs...</span> : null}
-          {error ? <span style={{ color: "#b91c1c" }}>{error}</span> : null}
-        </div>
+          <div className="header-actions" style={{ marginTop: 12 }}>
+            <button onClick={clearFilters}>Clear filters</button>
+            <button onClick={shareCurrentView}>Copy share link</button>
+            {error ? <span style={{ color: "#b91c1c" }}>{error}</span> : null}
+          </div>
+        </details>
       </section>
 
       <section className="panel" style={{ padding: 16, marginBottom: 16 }}>
@@ -619,7 +628,14 @@ export default function HomePage() {
           </div>
           <span className="subtle">Every row links back to a trajectory-level explanation</span>
         </div>
-        <div className="table-wrap">
+        <div className="table-pagination">
+          <span className="subtle">Page {pageIndex + 1} of {totalPages} | {PAGE_SIZE} runs per page</span>
+          <div className="header-actions">
+            <button disabled={pageIndex === 0 || loading} onClick={() => setPageIndex((current) => Math.max(0, current - 1))}>Previous</button>
+            <button disabled={pageIndex + 1 >= totalPages || loading} onClick={() => setPageIndex((current) => current + 1)}>Next</button>
+          </div>
+        </div>
+        <div className="table-wrap table-wrap-compact">
           <table className="modern-table">
             <thead>
               {table.getHeaderGroups().map((headerGroup) => (
@@ -651,7 +667,7 @@ export default function HomePage() {
                           </span>
                         ) : cell.column.id === "task_or_scenario" ? (
                           <div style={{ display: "grid", gap: 4 }}>
-                            <span>{flexRender(cell.column.columnDef.cell, cell.getContext())}</span>
+                            <span className="table-text-compact">{flexRender(cell.column.columnDef.cell, cell.getContext())}</span>
                             <div className="subtle">
                               {run.failure_category ?? run.run_type ?? "untyped"} | first error: {run.first_error_step ?? "none"}
                             </div>
@@ -666,6 +682,13 @@ export default function HomePage() {
               })}
             </tbody>
           </table>
+        </div>
+        <div className="table-pagination table-pagination-bottom">
+          <span className="subtle">Showing {firstVisibleRun}-{lastVisibleRun} of {total}</span>
+          <div className="header-actions">
+            <button disabled={pageIndex === 0 || loading} onClick={() => setPageIndex((current) => Math.max(0, current - 1))}>Previous</button>
+            <button disabled={pageIndex + 1 >= totalPages || loading} onClick={() => setPageIndex((current) => current + 1)}>Next</button>
+          </div>
         </div>
       </section>
     </main>

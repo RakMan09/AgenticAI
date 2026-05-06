@@ -78,13 +78,13 @@ Open:
 - `http://localhost:3000/case-studies`
 
 ## Core Features
-- Run Explorer with rich filtering and run stats
-- Failure-family clustering and failure-emergence snapshots on the home page
-- Trace Viewer with phase map, expected-vs-observed workflow checks, and intervention hints
+- Run Explorer with rich filtering, compact cards, and 20-run pagination
+- Failure-family clustering and cohort-level failure-emergence snapshots on the home page
+- Trace Viewer with a compact single-line ribbon, click-to-inspect selected-step cards, dataset-backed "Doing" summaries, first-error markers, phase map, expected-vs-observed workflow checks, and intervention hints
 - Failure overlays (`provided`, `taxonomy`, `heuristic`, `manual`)
 - Gap signals (`missing_*`, `absent_*`, `never_*`)
-- Compare view (raw + alignment-aware) with divergence summaries
-- Fleet analytics with labels, gaps, tool usage, prevalence metrics, outcome bands, emergence heatmaps, and run scatterplots
+- Compare view (raw + alignment-aware) with explicit run selection, cumulative error growth charting, and divergence summaries
+- Fleet analytics with labels, gaps, tool usage, prevalence metrics, compact cohort views, outcome bands, emergence heatmaps, and run scatterplots
 - Case-study mode and run-level reports (`json` + `md`)
 - Reviewer notes and benchmark subset assignment
 

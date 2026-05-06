@@ -56,8 +56,8 @@ The codebase preserves Week 1-6 behavior and extends through Week 15 with case-s
     - `POST /admin/recompute-heuristics`
     - `POST /admin/rebuild-derived-data`
 - UI:
-  - Run Explorer includes source/type/failure-aware filtering and display.
-  - Run Detail shows failure summary + overlays + gap signals + manual labels + reviewer/case-study controls.
-  - Compare View surfaces overlay labels and first divergence marker.
-  - Fleet Analytics page exists.
+  - Run Explorer includes source/type/failure-aware filtering, compact table rows, cohort stats, and 20-run pagination.
+  - Run Detail uses a compact trace ribbon with selected-step highlighting, first-error markers, dataset-backed "Doing" summaries, progressive disclosure for payloads, failure summary, overlays, gap signals, reviewer notes, and case-study controls.
+  - Compare View supports explicit multi-run selection and a single cumulative error growth chart for distinguishing runs.
+  - Fleet Analytics page uses compact cohort panels and graph-based summaries to reduce scrolling.
   - Case Studies page exists for curation and benchmark subset operations.

@@ -50,9 +50,9 @@ export default function AnalyticsPage() {
     try {
       const [overviewData, labelsData, toolsData, gapsData, runsData] = await Promise.all([
         fetchAnalyticsOverview(),
-        fetchAnalyticsFailureLabels(30),
-        fetchAnalyticsToolUsage(30),
-        fetchAnalyticsGaps(30),
+        fetchAnalyticsFailureLabels(12),
+        fetchAnalyticsToolUsage(12),
+        fetchAnalyticsGaps(12),
         fetchRuns({ limit: 500, offset: 0, sort_by: "started_at", sort_dir: "desc" }),
       ]);
       setOverview(overviewData);
@@ -76,7 +76,7 @@ export default function AnalyticsPage() {
       setCohortRuns([]);
       return;
     }
-    const params: Parameters<typeof fetchRuns>[0] = { limit: 50, offset: 0, sort_by: "started_at", sort_dir: "desc" };
+    const params: Parameters<typeof fetchRuns>[0] = { limit: 20, offset: 0, sort_by: "started_at", sort_dir: "desc" };
     if (cohortFilter.kind === "label" || cohortFilter.kind === "gap") params.label = cohortFilter.value;
     if (cohortFilter.kind === "tool") params.tool = cohortFilter.value;
     if (cohortFilter.kind === "outcome") params.outcome = cohortFilter.value;
@@ -123,9 +123,7 @@ export default function AnalyticsPage() {
         <div>
           <p className="eyebrow">Fleet View</p>
           <h1 className="hero-title" style={{ fontSize: 30 }}>Fleet Analytics</h1>
-          <p className="hero-copy">
-            Move from descriptive counts to exploratory analysis. Click a label, tool, gap, or outcome to build a cohort and inspect representative runs.
-          </p>
+          <p className="hero-copy">Graph-first fleet view for outcomes, failure timing, run complexity, labels, tools, and gaps.</p>
         </div>
         <div className="hero-actions">
           <button onClick={() => void load()}>Refresh</button>
@@ -202,7 +200,7 @@ export default function AnalyticsPage() {
             </div>
           </section>
 
-          <div className="analytics-grid" style={{ marginBottom: 12 }}>
+          <div className="analytics-grid analytics-grid-compact" style={{ marginBottom: 12 }}>
             <section className="panel" style={{ padding: 14 }}>
               <h2 style={{ marginTop: 0, fontSize: 18 }}>Overview</h2>
               <div className="kpi-row">
@@ -252,7 +250,7 @@ export default function AnalyticsPage() {
             </section>
           </div>
 
-          <div className="analytics-grid" style={{ marginBottom: 12 }}>
+          <div className="analytics-grid analytics-grid-compact" style={{ marginBottom: 12 }}>
             <section className="graph-panel">
               <div className="graph-header">
                 <div>
@@ -333,11 +331,11 @@ export default function AnalyticsPage() {
             </section>
           </div>
 
-          <div className="analytics-grid" style={{ marginBottom: 12 }}>
+          <div className="analytics-grid analytics-grid-compact" style={{ marginBottom: 12 }}>
             <section className="panel" style={{ padding: 14 }}>
               <h2 style={{ marginTop: 0, fontSize: 18 }}>Failure Labels</h2>
-              <div style={{ display: "grid", gap: 8 }}>
-                {labels.map((row) => (
+              <div className="analytics-compact-list">
+                {labels.slice(0, 10).map((row) => (
                   <button
                     key={`${row.label}-${row.label_type}`}
                     className={`metric-card metric-button ${cohortFilter?.kind === "label" && cohortFilter.value === row.label ? "button-selected" : ""}`}
@@ -358,8 +356,8 @@ export default function AnalyticsPage() {
 
             <section className="panel" style={{ padding: 14 }}>
               <h2 style={{ marginTop: 0, fontSize: 18 }}>Tool Usage</h2>
-              <div style={{ display: "grid", gap: 8 }}>
-                {tools.map((row) => (
+              <div className="analytics-compact-list">
+                {tools.slice(0, 10).map((row) => (
                   <button
                     key={row.tool_name}
                     className={`metric-card metric-button ${cohortFilter?.kind === "tool" && cohortFilter.value === row.tool_name ? "button-selected" : ""}`}
@@ -382,8 +380,8 @@ export default function AnalyticsPage() {
 
             <section className="panel" style={{ padding: 14 }}>
               <h2 style={{ marginTop: 0, fontSize: 18 }}>Gap Patterns</h2>
-              <div style={{ display: "grid", gap: 8 }}>
-                {gaps.map((row) => (
+              <div className="analytics-compact-list">
+                {gaps.slice(0, 10).map((row) => (
                   <button
                     key={row.label}
                     className={`metric-card metric-button ${cohortFilter?.kind === "gap" && cohortFilter.value === row.label ? "button-selected" : ""}`}
@@ -403,7 +401,7 @@ export default function AnalyticsPage() {
             </section>
           </div>
 
-          <section className="panel" style={{ padding: 14 }}>
+          <section className="panel analytics-cohort-panel" style={{ padding: 14 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 10 }}>
               <h2 style={{ margin: 0, fontSize: 18 }}>Cohort Explorer</h2>
               {cohortFilter ? (
