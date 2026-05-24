@@ -75,7 +75,7 @@ user
 -> assistant (final report)
 
 What to use as the primary dataset
-Use the five raw session JSONL files as the primary dataset.
+Use the six raw session JSONL files plus the converted multi-agent event trace as the primary dataset.
 
 Recommended priority:
 1. <SESSION_1_FILE>.jsonl
@@ -83,10 +83,14 @@ Recommended priority:
 3. <SESSION_3_FILE>.jsonl
 4. <SESSION_4_FILE>.jsonl
 5. <SESSION_5_FILE>.jsonl
+6. openclaw_session_trace_6.jsonl
+7. openclaw_multi_agent_payment_trace.jsonl
 
 Overlap note:
 - openclaw_session_trace_3.jsonl and openclaw_session_trace_4.jsonl are prefix snapshots of openclaw_session_trace_5.jsonl.
 - The ingestion pipeline deduplicates OpenClaw user turns by session_id + user_message_id so both files can remain in the dataset folder without double-counting repeated turns.
+- openclaw_session_trace_6.jsonl is the raw OpenClaw session for the multi-agent payment incident workflow.
+- openclaw_multi_agent_payment_trace.jsonl converts that session output into explicit event-level steps with planner, tool, recovery, research, verifier, and finalizer agents.
 
 Use dataset_summary.txt for orientation only.
 It is not the source of truth.
@@ -117,5 +121,6 @@ This dataset provides real agent trajectories from OpenClaw, including:
 - startup/bootstrap behavior
 - internal file-read behavior
 - missing-file error cases
+- multi-agent handoffs, verifier rejection/approval, and recovery after ambiguous evidence
 
 This is the dataset that should now be used for real-trace analysis in the project.

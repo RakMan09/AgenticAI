@@ -155,6 +155,10 @@ npm run dev
 
 ## Data Note
 Current default dataset is real OpenClaw session JSONL traces from `Dataset/`.
+The current dataset also includes a converted multi-agent payment incident trace,
+`Dataset/openclaw_multi_agent_payment_trace.jsonl`, derived from
+`Dataset/openclaw_session_trace_6.jsonl`. It provides a 20-step workflow with
+planner, tool, recovery, research, verifier, and finalizer agents.
 Synthetic traces remain available as a fallback/dev dataset.
 
 ## Documentation

@@ -8,6 +8,8 @@
   - `openclaw_session_trace_3.jsonl`
   - `openclaw_session_trace_4.jsonl`
   - `openclaw_session_trace_5.jsonl`
+  - `openclaw_session_trace_6.jsonl`
+  - `openclaw_multi_agent_payment_trace.jsonl`
   - `readme.txt`
   - `dataset_summary.txt`
 
@@ -16,6 +18,14 @@ These are raw session logs where:
 - tool outputs appear as `message.role="toolResult"`
 - runs are derived during ingestion as user-turn trajectories
 - duplicate OpenClaw turns are deduplicated during ingestion by stable `session_id` + `user_message_id`; `openclaw_session_trace_3.jsonl` and `openclaw_session_trace_4.jsonl` are prefix snapshots of `openclaw_session_trace_5.jsonl`
+- `openclaw_session_trace_6.jsonl` is the raw OpenClaw session containing the multi-agent payment incident prompt/output
+- `openclaw_multi_agent_payment_trace.jsonl` is the canonical event-level conversion of that output into 20 explicit steps across planner, tool, recovery, research, verifier, and finalizer agents
+
+Current default ingestion result:
+- 50 runs
+- 385 raw events / derived steps
+- 41 success, 9 fail, 0 unknown
+- latest highlighted multi-agent run: `run_openclaw_multi_agent_payment_incident_20260524`
 
 ## Secondary Dataset (Synthetic Fallback)
 - Directory: `data/raw/project1_event_runs/generated/`

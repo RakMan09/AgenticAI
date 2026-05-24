@@ -23,6 +23,17 @@ Files:
    - Extends openclaw_session_trace_3.jsonl and openclaw_session_trace_4.jsonl
    - Contains complex tool tasks with retries, HTTP failures, and recovery behavior
 
+6. openclaw_session_trace_6.jsonl
+   - Raw OpenClaw session collected on 2026-05-24
+   - Contains the prompt and output for a multi-agent payment incident investigation
+   - Includes planner, research, tool, verifier, recovery, and finalizer roles in the assistant output
+
+7. openclaw_multi_agent_payment_trace.jsonl
+   - Canonical event-level conversion of openclaw_session_trace_6.jsonl
+   - Run id: run_openclaw_multi_agent_payment_incident_20260524
+   - Contains 20 explicit steps across 6 agents
+   - Includes 10 tool checks, a failed/ambiguous log query, recovery, verifier rejection, additional evidence collection, verifier approval, and finalization
+
 Counts:
 Session 1
 - user messages: 31
@@ -60,10 +71,15 @@ Session 5
 - embedded tool calls: 63
 - failed tool results: 24
 
-Current ingestion result with all five files:
-- deduplicated runs: 47
-- raw events / derived steps: 359
-- outcomes: 38 success, 9 fail, 0 unknown
+Session 6
+- user messages: 2
+- assistant messages: 2
+- converted multi-agent event rows: 20
+
+Current ingestion result with all current dataset files:
+- deduplicated runs: 50
+- raw events / derived steps: 385
+- outcomes: 41 success, 9 fail, 0 unknown
 
 Overlap note:
 - openclaw_session_trace_3.jsonl and openclaw_session_trace_4.jsonl are prefixes of openclaw_session_trace_5.jsonl.
@@ -82,6 +98,7 @@ How this relates to the project:
 - These files should be treated as the real OpenClaw trace dataset for the project handoff.
 - Synthetic traces were used earlier to bootstrap the project pipeline and visual flow.
 - These raw OpenClaw session traces are now the source of truth for real trajectory analysis.
+- The converted multi-agent payment trace is included so the UI can display explicit agent_id-level handoffs instead of only showing the raw chat turn.
 - Higher-level failure categories such as tool misuse, early quit, reasoning gaps, or missing steps may need to be derived during ingestion, annotation, or visualization, because they are not always explicitly pre-labeled in the raw trace files.
 
 Purpose:
