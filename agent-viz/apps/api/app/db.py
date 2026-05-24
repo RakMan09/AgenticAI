@@ -11,7 +11,18 @@ import duckdb
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DB_PATH = PROJECT_ROOT / "db" / "traces.duckdb"
-VALID_STEP_TYPES = {"thought", "action", "observation", "tool_call", "unknown"}
+VALID_STEP_TYPES = {
+    "thought",
+    "action",
+    "observation",
+    "tool_call",
+    "planning",
+    "research",
+    "verification",
+    "recovery",
+    "final",
+    "unknown",
+}
 ACTION_TOOL_PATTERN = re.compile(r"\baction\s*:\s*([a-zA-Z_][a-zA-Z0-9_-]*)\s*\[", re.IGNORECASE)
 WORD_SPLIT_PATTERN = re.compile(r"[^a-z0-9]+")
 
@@ -77,13 +88,24 @@ def extract_tool_name_from_text(text: str | None) -> str | None:
     return match.group(1).strip().lower()
 
 
-def infer_display_step_type(raw_step_type: str, text: str | None, tool_name: str | None) -> str:
+def infer_display_step_type(raw_step_type: str, text: str | None, tool_name: str | None, event_type: str | None = None) -> str:
     normalized_raw = (raw_step_type or "unknown").lower()
     if normalized_raw not in VALID_STEP_TYPES:
         normalized_raw = "unknown"
 
     if tool_name:
         return "tool_call"
+    normalized_event = (event_type or "").lower()
+    if normalized_event in {"plan", "plan_update", "planning"}:
+        return "planning"
+    if normalized_event == "research":
+        return "research"
+    if normalized_event == "verification":
+        return "verification"
+    if normalized_event == "recovery":
+        return "recovery"
+    if normalized_event == "final_outcome":
+        return "final"
     low = (text or "").lower()
     if "action:" in low and "[" in low and "]" in low:
         return "tool_call"
@@ -211,10 +233,15 @@ def fetch_runs(
                 "SELECT 1 FROM steps s "
                 "WHERE s.run_id = r.run_id "
                 "AND (lower(coalesce(s.step_type, '')) = ? "
-                "OR (? = 'tool_call' AND coalesce(s.tool_name, '') <> ''))"
+                "OR (? = 'tool_call' AND coalesce(s.tool_name, '') <> '') "
+                "OR (? = 'planning' AND lower(coalesce(s.event_type, '')) IN ('plan', 'plan_update', 'planning')) "
+                "OR (? = 'research' AND lower(coalesce(s.event_type, '')) = 'research') "
+                "OR (? = 'verification' AND lower(coalesce(s.event_type, '')) = 'verification') "
+                "OR (? = 'recovery' AND lower(coalesce(s.event_type, '')) = 'recovery') "
+                "OR (? = 'final' AND lower(coalesce(s.event_type, '')) = 'final_outcome'))"
                 ")"
             )
-            params.extend([normalized_step_type, normalized_step_type])
+            params.extend([normalized_step_type] + [normalized_step_type] * 6)
 
         if label:
             where_parts.append(
@@ -426,7 +453,7 @@ def fetch_steps(
     for row in rows:
         raw_tool_name = row[4]
         inferred_tool_name = raw_tool_name or extract_tool_name_from_text(row[3])
-        display_step_type = infer_display_step_type(row[2], row[3], inferred_tool_name)
+        display_step_type = infer_display_step_type(row[2], row[3], inferred_tool_name, row[10])
         tags = parse_json_list(row[15])
         typed_rows.append(
             {

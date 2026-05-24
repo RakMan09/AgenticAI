@@ -26,7 +26,7 @@ import {
 import type { AnnotationRow, FailureSummary, ReviewNoteRow, RunDetail, StepRow } from "../../../lib/types";
 
 type ExpandState = Record<number, boolean>;
-type StepTypeFilter = "all" | "thought" | "action" | "observation" | "tool_call" | "unknown";
+type StepTypeFilter = "all" | StepRow["display_step_type"];
 type RibbonDetailMode = "selected" | "errors" | "all" | null;
 
 function parseMaybeJson(raw: string | Record<string, unknown> | null): string {
@@ -62,6 +62,16 @@ function stepTypeStyle(stepType: string): { background: string; color: string } 
       return { background: "#fef3c7", color: "#92400e" };
     case "tool_call":
       return { background: "#dcfce7", color: "#166534" };
+    case "planning":
+      return { background: "#e0e7ff", color: "#3730a3" };
+    case "research":
+      return { background: "#f3e8ff", color: "#6b21a8" };
+    case "verification":
+      return { background: "#fee2e2", color: "#991b1b" };
+    case "recovery":
+      return { background: "#ffedd5", color: "#9a3412" };
+    case "final":
+      return { background: "#ccfbf1", color: "#115e59" };
     default:
       return { background: "#e2e8f0", color: "#334155" };
   }
@@ -96,6 +106,9 @@ function compactStepLabel(step: StepRow): string {
   if (step.event_type === "assistant_message") return "answer";
   if (step.event_type === "assistant_thinking") return "think";
   if (step.event_type === "tool_result") return step.error_flag ? "tool error" : "result";
+  if (step.display_step_type === "planning") return "plan";
+  if (step.display_step_type === "verification") return step.status === "warning" ? "verify block" : "verify";
+  if (step.display_step_type === "final") return "final";
   return step.display_step_type.replace("_", " ");
 }
 
@@ -301,7 +314,18 @@ export default function RunDetailPage({ params }: { params: { run_id: string } }
   const uniqueOverlays = useMemo(() => dedupeAnnotations(annotations), [annotations]);
   const uniqueGapSignals = useMemo(() => dedupeAnnotations(gapSignals), [gapSignals]);
   const stepTypeCounts = useMemo(() => {
-    const counts: Record<string, number> = { thought: 0, action: 0, observation: 0, tool_call: 0, unknown: 0 };
+    const counts: Record<string, number> = {
+      thought: 0,
+      action: 0,
+      observation: 0,
+      tool_call: 0,
+      planning: 0,
+      research: 0,
+      verification: 0,
+      recovery: 0,
+      final: 0,
+      unknown: 0,
+    };
     for (const step of steps) counts[step.display_step_type] = (counts[step.display_step_type] ?? 0) + 1;
     return counts;
   }, [steps]);
@@ -471,6 +495,11 @@ export default function RunDetailPage({ params }: { params: { run_id: string } }
               <option value="action">action</option>
               <option value="observation">observation</option>
               <option value="tool_call">tool_call</option>
+              <option value="planning">planning</option>
+              <option value="research">research</option>
+              <option value="verification">verification</option>
+              <option value="recovery">recovery</option>
+              <option value="final">final</option>
               <option value="unknown">unknown</option>
             </select>
           </label>
@@ -501,6 +530,11 @@ export default function RunDetailPage({ params }: { params: { run_id: string } }
           <span><i className="legend-dot timeline-dot-tool_call" />tool call</span>
           <span><i className="legend-dot timeline-dot-observation" />result</span>
           <span><i className="legend-dot timeline-dot-action" />answer</span>
+          <span><i className="legend-dot timeline-dot-planning" />planning</span>
+          <span><i className="legend-dot timeline-dot-research" />research</span>
+          <span><i className="legend-dot timeline-dot-verification" />verification</span>
+          <span><i className="legend-dot timeline-dot-recovery" />recovery</span>
+          <span><i className="legend-dot timeline-dot-final" />final</span>
           <span><i className="legend-dot timeline-dot-error" />error</span>
         </div>
         <div className="trace-ribbon" aria-label="compact trace timeline">

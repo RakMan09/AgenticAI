@@ -192,6 +192,11 @@ export function inferStepIntent(step: StepRow): string {
   if (step.tool_name) return `Use ${step.tool_name}`;
   if (step.error_flag) return "Recover from failure";
   if (step.display_step_type === "thought") return "Reason about next move";
+  if (step.display_step_type === "planning") return "Plan investigation";
+  if (step.display_step_type === "research") return "Synthesize evidence";
+  if (step.display_step_type === "verification") return "Verify conclusion";
+  if (step.display_step_type === "recovery") return "Recover workflow";
+  if (step.display_step_type === "final") return "Finalize answer";
   if (step.display_step_type === "observation") return "Interpret evidence";
   if (step.display_step_type === "action") return "Commit to next action";
   return "Continue run";

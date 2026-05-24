@@ -32,8 +32,8 @@ export interface RunDetail extends RunRow {
 export interface StepRow {
   run_id: string;
   step_idx: number;
-  step_type: "thought" | "action" | "observation" | "tool_call" | "unknown";
-  display_step_type: "thought" | "action" | "observation" | "tool_call" | "unknown";
+  step_type: "thought" | "action" | "observation" | "tool_call" | "planning" | "research" | "verification" | "recovery" | "final" | "unknown";
+  display_step_type: "thought" | "action" | "observation" | "tool_call" | "planning" | "research" | "verification" | "recovery" | "final" | "unknown";
   text: string | null;
   tool_name: string | null;
   tool_input: string | Record<string, unknown> | null;

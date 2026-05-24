@@ -874,6 +874,31 @@ button:disabled {
   border-color: #a5f3fc;
 }
 
+.trace-node-planning {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+}
+
+.trace-node-research {
+  background: #faf5ff;
+  border-color: #e9d5ff;
+}
+
+.trace-node-verification {
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+
+.trace-node-recovery {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.trace-node-final {
+  background: #f0fdfa;
+  border-color: #99f6e4;
+}
+
 .trace-node-unknown {
   background: #f1f5f9;
   border-color: #cbd5e1;
@@ -1062,6 +1087,26 @@ button:disabled {
   background: #06b6d4;
 }
 
+.timeline-dot-planning {
+  background: #6366f1;
+}
+
+.timeline-dot-research {
+  background: #a855f7;
+}
+
+.timeline-dot-verification {
+  background: #f43f5e;
+}
+
+.timeline-dot-recovery {
+  background: #f97316;
+}
+
+.timeline-dot-final {
+  background: #14b8a6;
+}
+
 .timeline-dot-error {
   background: #ef4444;
 }
@@ -1199,6 +1244,31 @@ button:disabled {
 .trace-mini-type-action {
   background: #cffafe;
   color: #0f766e;
+}
+
+.trace-mini-type-planning {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.trace-mini-type-research {
+  background: #f3e8ff;
+  color: #6b21a8;
+}
+
+.trace-mini-type-verification {
+  background: #ffe4e6;
+  color: #9f1239;
+}
+
+.trace-mini-type-recovery {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.trace-mini-type-final {
+  background: #ccfbf1;
+  color: #115e59;
 }
 
 .trace-mini-type-unknown {

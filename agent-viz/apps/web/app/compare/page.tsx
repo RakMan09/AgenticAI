@@ -30,6 +30,9 @@ function compactStepLabel(step: StepRow): string {
   if (step.event_type === "assistant_message") return "answer";
   if (step.event_type === "assistant_thinking") return "think";
   if (step.event_type === "tool_result") return step.error_flag ? "tool error" : "result";
+  if (step.display_step_type === "planning") return "plan";
+  if (step.display_step_type === "verification") return step.status === "warning" ? "verify block" : "verify";
+  if (step.display_step_type === "final") return "final";
   return step.display_step_type.replace("_", " ");
 }
 
@@ -92,7 +95,18 @@ function stepTypeCounts(steps: StepRow[]): Record<StepTypeKey, number> {
       counts[step.display_step_type] += 1;
       return counts;
     },
-    { thought: 0, action: 0, observation: 0, tool_call: 0, unknown: 0 },
+    {
+      thought: 0,
+      action: 0,
+      observation: 0,
+      tool_call: 0,
+      planning: 0,
+      research: 0,
+      verification: 0,
+      recovery: 0,
+      final: 0,
+      unknown: 0,
+    },
   );
 }
 
@@ -328,6 +342,11 @@ export default function ComparePage() {
           <span><i className="legend-dot timeline-dot-tool_call" />tool call</span>
           <span><i className="legend-dot timeline-dot-observation" />result</span>
           <span><i className="legend-dot timeline-dot-action" />answer</span>
+          <span><i className="legend-dot timeline-dot-planning" />planning</span>
+          <span><i className="legend-dot timeline-dot-research" />research</span>
+          <span><i className="legend-dot timeline-dot-verification" />verification</span>
+          <span><i className="legend-dot timeline-dot-recovery" />recovery</span>
+          <span><i className="legend-dot timeline-dot-final" />final</span>
           <span><i className="legend-dot timeline-dot-error" />error</span>
         </div>
         {error ? <p style={{ color: "#b91c1c", marginTop: 12 }}>{error}</p> : null}

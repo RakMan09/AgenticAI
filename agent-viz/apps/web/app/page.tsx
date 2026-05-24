@@ -537,6 +537,11 @@ export default function HomePage() {
                 <option value="action">action</option>
                 <option value="observation">observation</option>
                 <option value="tool_call">tool_call</option>
+                <option value="planning">planning</option>
+                <option value="research">research</option>
+                <option value="verification">verification</option>
+                <option value="recovery">recovery</option>
+                <option value="final">final</option>
                 <option value="unknown">unknown</option>
               </select>
             </label>
